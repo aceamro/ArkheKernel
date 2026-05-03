@@ -12,5 +12,5 @@
 # Update command: shasum -a 256 scripts/verify-axiom-cite.sh
 #          (replace this file's hash entry with the output line, preserve header block).
 #
-dcc11d8dc67846c52e69c3194645d5f1d60e61c26ed2d4e9df0999c5ea924ea6  scripts/verify-axiom-cite.sh
+bf290a4e1d0391639fff393ba15f1caa694720471f5c67c322faa184e8527d3d  scripts/verify-axiom-cite.sh
 416d1198de6625ade57d1d398e48daab702718807b23277c207295c45bf43e2f  scripts/verify-l0-baseline.sh
