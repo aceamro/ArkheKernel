@@ -91,10 +91,10 @@ def is_descriptive(name: str) -> bool:
       - `CONSTANTS_` — definitional foundation (e.g., E1 primitive set)
       - `_implies_`  — lemma documented in comment block, not declared as
                        TLA+ theorem entity (e.g., `SealedTrait_implies_E15.b`,
-                       `SealedHostLinker_implies_4_set` from M2.4/M2.5
-                       paired commit). Lemma names follow
-                       `<premise>_implies_<conclusion>` convention; the
-                       comment block carries the proof sketch + anchors.
+                       `SealedHostLinker_implies_4_set`). Lemma names
+                       follow `<premise>_implies_<conclusion>` convention;
+                       the comment block carries the proof sketch +
+                       anchors.
     """
     return (
         "_via_" in name

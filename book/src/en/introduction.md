@@ -49,7 +49,7 @@ The full set of 24 axioms is documented in [Invariants](architecture/invariants.
 
 ## Stability
 
-**v0.11**. The project is finalized at v0.11; subsequent fixes remain under the v0.11 label.
+**v0.13**. The project is finalized at v0.13; subsequent fixes remain under the v0.13 label.
 **1.0 is intentionally never reached** — "no design is perfect; one only approaches it asymptotically"
 is the operating principle.
 

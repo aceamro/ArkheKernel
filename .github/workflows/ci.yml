@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # DIP-N6 M5.1 — 7-config test matrix. Each matrix job runs
+  # 7-config test matrix. Each matrix job runs
   # `cargo test --workspace <flags>` for one umbrella feature combo and
   # asserts the passed test count matches `ci/test-baselines.txt` (drift
   # forces operator update + Layer A/L0 verify). PR=fail-fast (dev iterates
@@ -54,8 +54,8 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --workspace ${{ matrix.config.flags }} 2>&1 | tee /tmp/test.log
-          # M5.1 (DIP-N6) — task #73 verified parse pattern + C5+ guards
-          # (CRLF-safe `tr -d` + empty-baseline guard).
+          # CRLF-safe `tr -d` + empty-baseline guard around the count
+          # comparison (handles GitHub-runner line-ending quirks).
           actual=$(grep -E "^test result:" /tmp/test.log | awk '{s+=$4} END {print s+0}')
           expected=$(grep -E "^${{ matrix.config.name }}=" ci/test-baselines.txt | cut -d= -f2 | tr -d ' \t\r\n')
           if [ -z "$expected" ]; then
@@ -70,9 +70,9 @@ jobs:
           fi
           echo "::notice::${{ matrix.config.name }} test count = $actual (matches baseline)"
 
-  # DIP-N6 M5.1 — config-independent lint axis split out of the matrix
-  # `test` job. fmt/clippy/doc/compile-check are not feature-flag dependent,
-  # so running them once (here) avoids 7x redundancy under the matrix.
+  # Config-independent lint axis, split out of the matrix `test` job.
+  # fmt/clippy/doc/compile-check are not feature-flag dependent, so
+  # running them once (here) avoids 7x redundancy under the matrix.
   lint:
     name: lint + doc + compile-check (config-independent)
     runs-on: ubuntu-latest
@@ -110,18 +110,20 @@ jobs:
         run: |
           cargo run --quiet -p dice-domain | tail -5
 
-      # DIP-N6 M5.4 — Script integrity verify (cryptographer LEAD). Header
-      # 주석 제거 후 shasum -c 로 검증 (verify-l0-baseline 패턴 carry).
-      # Mismatch = silent tampering 또는 의도적 변경 미반영 → CI fail.
-      - name: Verify CI script integrity (M5.4)
+      # Script integrity verify. Header comments are stripped before
+      # `shasum -c` (same pattern as verify-l0-baseline.sh). A mismatch
+      # is either silent tampering or an intentional change not reflected
+      # in the baseline — either way, CI fails.
+      - name: Verify CI script integrity
         run: grep -v '^#' ci/scripts-baseline-hashes.txt | grep -v '^[[:space:]]*$' | shasum -a 256 -c
 
-      # DIP-N6 M5.3 — Axiom inventory ↔ TLA+ INV + Rust impl test 1:1 grep gate.
-      # Verifies that every cited TLA+ identifier appears in its `tla_module`
-      # file and every cited impl_test appears as `fn <name>` in at least one
-      # cited impl_path. Source-of-truth = `formal/axiom-test-cite.toml` (M5.2
-      # deliverable). config-independent (TOML parse + grep, no feature flags).
-      - name: Verify axiom-test cite mapping (M5.3)
+      # Axiom inventory ↔ TLA+ INV + Rust impl test 1:1 grep gate.
+      # Verifies that every cited TLA+ identifier appears in its
+      # `tla_module` file and every cited impl_test appears as
+      # `fn <name>` in at least one cited impl_path. Source-of-truth =
+      # `formal/axiom-test-cite.toml`. Config-independent (TOML parse
+      # + grep, no feature flags).
+      - name: Verify axiom-test cite mapping
         run: bash scripts/verify-axiom-cite.sh
 
   supply-chain:
@@ -175,11 +177,12 @@ jobs:
       - name: Verify L0 baseline SHA-256 hashes
         run: ./scripts/verify-l0-baseline.sh
 
-  # DIP-N5 sub-step E.1 — TLA+ refinement spec gate. Runs Apalache
-  # `typecheck` on every `formal/tla-plus/*.tla` file. Bounded MC
-  # (`apalache-mc check --inv=...`) lands per-module from E.3 onward.
-  # Apalache 0.57.0 jar pinned by SHA-256 hash from the official release
-  # `sha256sum.txt` (auditor C2 — full SHA-256 verify before extract).
+  # TLA+ refinement spec gate. Runs Apalache `typecheck` on every
+  # `formal/tla-plus/*.tla` file. Bounded MC (`apalache-mc check
+  # --inv=...`) is run on demand per module. Apalache 0.57.0 jar
+  # pinned by SHA-256 hash from the official release `sha256sum.txt`
+  # — full SHA-256 is verified before extract (digest alone would
+  # be insufficient).
   tla-plus-check:
     name: TLA+ Apalache typecheck
     runs-on: ubuntu-latest
@@ -207,7 +210,7 @@ jobs:
           cd ~/.apalache
           # SHA-256 from
           # https://github.com/apalache-mc/apalache/releases/download/v0.57.0/sha256sum.txt
-          # (auditor C2 — digest 만으로 약함, full SHA-256 verify).
+          # — full SHA-256 verify (digest alone would be insufficient).
           APALACHE_VERSION="0.57.0"
           APALACHE_TGZ="apalache-${APALACHE_VERSION}.tgz"
           APALACHE_SHA256="b0eab09c832750cb731786480c48a2768a48d77016b48475fb3945166e350244"
@@ -323,12 +326,11 @@ jobs:
           name: arkhe-release-${{ github.ref_name }}
           path: artifacts/
 
-  # Pages job is deferred until post-v0.12. The repo is private under a
-  # plan tier that does not include Pages, so `actions/configure-pages`
-  # cannot enable a site (default GITHUB_TOKEN lacks admin scope and the
-  # repo Settings -> Pages source picker is unavailable). Re-enable
-  # after v0.12 cut by deciding repo visibility (public) or plan
-  # upgrade.
+  # Pages job is deferred. The repo is private under a plan tier that
+  # does not include Pages, so `actions/configure-pages` cannot enable a
+  # site (default GITHUB_TOKEN lacks admin scope and the repo Settings
+  # -> Pages source picker is unavailable). Re-enable by deciding repo
+  # visibility (public) or plan upgrade.
   pages:
     name: build + deploy GitHub Pages
     if: false

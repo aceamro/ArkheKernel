@@ -23,7 +23,9 @@ Layer independence is one-way: L0 ← Runtime ← Shell. Shell repositories
 | [`alpha-release-schedule.md`](alpha-release-schedule.md) | Alpha-release blocker docs (5 Runtime + 1 BBS) and external-legal review buffer. |
 | [`msrv-policy.md`](msrv-policy.md) | MSRV 1.80+ pin + future bump conditions. |
 | [`spec-drift-candidates.md`](spec-drift-candidates.md) | Implementation-ahead drifts queued for the next spec patch round. |
-| [`runtime-sealing-plan.md`](runtime-sealing-plan.md) | v0.12 Runtime sealing plan — 8 work tracks (A-H), axioms E14 / E15, decision register. |
+| [`sealing-pattern-lineage.md`](sealing-pattern-lineage.md) | Sealed-trait lineage — A24 ↔ SealedCapToken ↔ SealedHostImport, the architectural anchor of the type-system sealing chain. |
+| [`axiom-test-cite-guide.md`](axiom-test-cite-guide.md) | Author + operator guide for the axiom-cite triple-link (TLA+ INV ↔ Rust impl test ↔ inventory). |
+| [`pqc-software-only.md`](pqc-software-only.md) | PQC software-only signer caveat — Tier 0/1/2 deployment matrix, key handling guide. |
 
 ## Build, ABI, release
 

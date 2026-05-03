@@ -1,10 +1,9 @@
 # Axiom Test Cite — Author + Operator Guide
 
-DIP-N6 Phase 2 M5.4 deliverable. Companion guide to M5 cluster (M5.1 7-config CI matrix
-+ M5.2 inventory + M5.3 grep gate + this document).
-
 This guide explains how the **`formal/axiom-test-cite.toml` ↔ TLA+ INV ↔ Rust impl
-test** triple-link works, and what an author must do when adding or modifying an axiom.
+test** triple-link works, and what an author must do when adding or modifying an
+axiom. It is the companion document to the four-piece axiom-cite mechanism: the
+7-config CI test matrix, the inventory file, the grep gate, and this guide.
 
 ## Purpose
 
@@ -30,12 +29,12 @@ fail the build.
 | Run the grep gate locally | `bash scripts/verify-axiom-cite.sh` | 0 pass / 1 mismatch / 2 env |
 | Inventory file | `formal/axiom-test-cite.toml` | — |
 | Inventory schema version | `[meta] schema_version` | currently `1` |
-| CI step | `lint` job → "Verify axiom-test cite mapping (M5.3)" | — |
+| CI step | `lint` job → "Verify axiom-test cite mapping" | — |
 
 ## Adding a new axiom
 
-When a future DIP introduces a new MACHINE-CHECKED axiom (e.g., `E16`), the author
-must update **all three layers** plus the inventory in a single coherent change.
+When a new MACHINE-CHECKED axiom (e.g., `E16`) is introduced, the author must
+update **all three layers** plus the inventory in a single coherent change.
 The CI grep gate makes the inventory the single source of truth — get the
 inventory right and everything else falls into place.
 
@@ -142,7 +141,7 @@ skipped by the gate on purpose:
   entities. Names follow `<premise>_implies_<conclusion>` convention; the
   comment block carries the formal content. Verified by inspecting the
   lemma section of the cited `tla_module` plus the witness impl tests
-  cited via `impl_tests` (e.g., M2.4/M2.5 paired commit anchors
+  cited via `impl_tests` (e.g., the sealed-trait pattern anchors —
   `hook_cap_token_satisfies_sealed_bound` etc.).
 
 The gate's skip rule is purely lexical: names containing `_via_` or
@@ -199,8 +198,8 @@ on every push.
   reviewer can confirm intent at a glance.
 
 The script integrity baseline is symmetric with `verify-l0-baseline.sh`
-(L0 source-file baseline) and is owned by the cryptographer axis as part of
-the M5 cluster sealing chain.
+(L0 source-file baseline) and is part of the sealing chain for the
+script-side verification surface.
 
 ## CI gate failure — how to debug
 
@@ -243,10 +242,10 @@ see 1, fix it and run again to surface any further issues.
 
 ## References
 
-- `formal/axiom-test-cite.toml` — inventory file (M5.2 deliverable).
-- `scripts/verify-axiom-cite.sh` — grep gate script (M5.3 deliverable).
-- `.github/workflows/ci.yml` `lint` job — CI gate integration (M5.3).
+- `formal/axiom-test-cite.toml` — inventory file.
+- `scripts/verify-axiom-cite.sh` — grep gate script.
+- `.github/workflows/ci.yml` `lint` job — CI gate integration.
 - `formal/tla-plus/README.md` — TLA+ refinement narrative + E1-E15 ↔ INV table.
 - `runtime-book/src/en/architecture/11-axioms.md` — Runtime axiom set (E1-E15).
 - `arkhe-forge-core/tests/axioms_e_series.rs` — E1-E13 impl tests.
-- `arkhe-runtime-proofs/src/lib.rs` — Kani 4-property suite (DIP-N5 E.8).
+- `arkhe-runtime-proofs/src/lib.rs` — Kani 4-property suite.

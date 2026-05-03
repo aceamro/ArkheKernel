@@ -1,14 +1,13 @@
 # L0 Baseline Hashes — arkhe-kernel/src/**/*.rs + arkhe-macros/src/**/*.rs
 #
-# Reference: ArkheKernel rename (Round 5) — baseline regenerated to match
-# the new crate name. L0 DO NOT TOUCH 8-item protection — CI gate baseline
-# for the L0 modification prohibition directive. When a PR includes L0
-# file changes against this baseline, the "L0 DIP companion declaration
-# obligation" CI warning fires.
+# L0 DO NOT TOUCH 8-item protection — CI gate baseline for the L0
+# modification prohibition directive. When a PR includes L0 file changes
+# against this baseline, the "L0 DIP companion declaration obligation"
+# CI warning fires.
 # Format: `<sha256>  <path>` — verbatim from `shasum -a 256` output.
 #
-# arkhe-macros/src/lib.rs (Layer A item 3 derive body) included from
-# v0.13 sealing baseline.
+# arkhe-macros/src/lib.rs (Layer A item 3 derive body) is included in
+# the baseline.
 #
 # Update procedure: regenerate baseline + auditor approval PR after the
 # L0-specific DIP completes and L0 release proceeds.

@@ -3,8 +3,8 @@
 **Spec status** — entered implementation after the four-person cold-read
 absorbed Major 3 (§5 two-stage freeze / §17 scale-aware SLA / §14 crypto
 primitives + KMS integration milestone split + crypto surface enumeration)
-plus selected Minor 5 (theorist Minor 1/2/3 spec clarifications, auditor
-Minor b classification correction, veteran Minor 1 §5 wording). 14 entry
+plus selected minor spec clarifications, classification corrections, and
+§5 wording adjustments inherited from internal review. 14 entry
 checkpoints were added at the same time. The spec body itself remained
 unchanged.
 
@@ -110,28 +110,29 @@ At the start of the Infrastructure milestone the implementation agent
 land before the Core-primitives milestone may begin. PR → designated
 reviewer approval → merge — three steps.
 
-| # | Item | Origin | Owner / reviewer | Deliverable |
-|---|------|--------|------------------|-------------|
-| 1 | **`arkhe-runtime-testkit` crate + custom Arbitrary + shrinker** | theorist M4 | implementer / theorist | `crates/arkhe-runtime-testkit/` — proptest `Arbitrary` impls (shell_id / TypeCode / Action / Component) + shrinker (auto-minimises regression cases). |
-| 2 | **`test-corpus/` policy + CI fixed seed** | theorist M5 | implementer / theorist | `test-corpus/README.md` — convention for storing regression cases (filenames / git LFS or inline / fixed CI seed). |
-| 3 | **`arkhe-trait-default-check` custom lint** | theorist M7 | implementer / theorist | Custom dylint — detects semantic changes to `#[derive(ArkheComponent)]` / `ArkheAction` / `ArkheEvent` default-method bodies (theorist Minor 1 breaking-change rule). |
-| 4 | **`ci/l0-baseline-hashes.txt` + L0-tag commit** | auditor Ma | implementer / auditor | SHA-256 list for `arkhe-kernel/src/**/*.rs` at the L0 v0.11 tag. Baseline for the §10 L0-frozen CI gate. |
-| 5 | **`cargo-vet` trust-base config** | cryptographer LF2 | implementer / cryptographer | `supply-chain/config.toml` — trusted crate authors + audit delegation. After `cargo vet init`, add the major trust bases (rust-lang / dtolnay / BurntSushi …). |
-| 6 | **`runtime_doctor_journal` signing key + HW storage** | cryptographer LF3 | implementer / cryptographer | Generate Ed25519 key pair + store on a **hardware security key** (YubiKey / NitroKey). Pin the public key in `docs/release-keys.md`. Document private-key custodians (≥ 2-person co-custody). |
-| 7 | **`trait ProcessProtection` Linux / macOS / Windows skeleton** | cryptographer LF4 / §15.5 HF1 carryover | implementer / cryptographer | `crates/arkhe-forge-platform/src/process_protection/{linux,macos,windows}.rs` — Linux `mlockall()` + `prctl(PR_SET_DUMPABLE, 0)` + ptrace protection / macOS `PT_DENY_ATTACH` + `VM_MAKE_NOMAP` / Windows `SetProcessMitigationPolicy` + `DebugSetProcessKillOnExit`. Skeleton stage (full impl by L2-complete). |
-| 8 | **HF2 library PoC (health check + Shamir threshold)** | cryptographer LF5 | implementer / cryptographer | `crates/arkhe-forge-platform/src/hf2_kms/` — multi-channel health check (DoH / alternate region / static IP) PoC + `shamir-secret-sharing` integration (`t = 2 of 3` authorisation token). Kept until KMS-integration milestone closes. |
-| 9 | **AEAD AAD 19-byte composition + DEK rotation metric skeleton** | cryptographer LF6 | implementer / cryptographer | `crates/arkhe-forge-core/src/pii.rs` — `compute_aad(dek_id, pii_code, aead_kind) -> [u8; 19]` helper + `arkhe_runtime_dek_message_count` counter skeleton. Filled in during the crypto-primitives milestone. |
-| 10 | **Binary reproducibility scope (same machine Linux x86_64)** | veteran M2 | implementer / veteran | `scripts/reproduce-build.sh` + `docs/build-reproducibility.md` — defines scope (same machine, same toolchain, same `CARGO_TARGET_DIR`, Linux x86_64 primary). Cross-machine / cross-platform reproducibility is a future-extension stretch. |
-| 11 | **Docs workload distribution (6 alpha-blocker docs × phase mapping)** | veteran M3 | implementer / veteran | `docs/alpha-release-schedule.md` — owners / deadlines / phases for the 6 docs. Workstream that runs parallel to Runtime implementation. |
-| 12 | **Single-active L2 SLO suspension policy** | veteran M4 | implementer / veteran | `docs/runbook/l2-single-active-operations.md` — convention for temporarily suspending the SLO (p99 projection_lag) during active-passive failover; pin the alert-policy lockout window. |
-| 13 | **`gdpr-crypto-erasure.md` external legal review — 8-week buffer** | veteran M5 | implementer / veteran + legal | Lock `docs/Legal/gdpr-crypto-erasure.md` draft completion + 8-week external legal-review window. Milestone fixed at pre-freeze. |
-| 14 | **Future-extension MSRV bump policy** | theorist M6 | implementer / theorist | `docs/msrv-policy.md` — re-confirm MSRV 1.80+ pin + future bump conditions (upstream toolchain security patch / crate ecosystem dependence …) + obligation to assess major-version impact at bump time. |
+| # | Item | Owner / reviewer | Deliverable |
+|---|------|------------------|-------------|
+| 1 | **`arkhe-runtime-testkit` crate + custom Arbitrary + shrinker** | implementer / theorist | `crates/arkhe-runtime-testkit/` — proptest `Arbitrary` impls (shell_id / TypeCode / Action / Component) + shrinker (auto-minimises regression cases). |
+| 2 | **`test-corpus/` policy + CI fixed seed** | implementer / theorist | `test-corpus/README.md` — convention for storing regression cases (filenames / git LFS or inline / fixed CI seed). |
+| 3 | **`arkhe-trait-default-check` custom lint** | implementer / theorist | Custom dylint — detects semantic changes to `#[derive(ArkheComponent)]` / `ArkheAction` / `ArkheEvent` default-method bodies (the breaking-change rule for default-method body semantics). |
+| 4 | **`ci/l0-baseline-hashes.txt` + L0-tag commit** | implementer / auditor | SHA-256 list for `arkhe-kernel/src/**/*.rs` at the L0 v0.11 tag. Baseline for the §10 L0-frozen CI gate. |
+| 5 | **`cargo-vet` trust-base config** | implementer / cryptographer | `supply-chain/config.toml` — trusted crate authors + audit delegation. After `cargo vet init`, add the major trust bases (rust-lang / dtolnay / BurntSushi …). |
+| 6 | **`runtime_doctor_journal` signing key + HW storage** | implementer / cryptographer | Generate Ed25519 key pair + store on a **hardware security key** (YubiKey / NitroKey). Pin the public key in `docs/release-keys.md`. Document private-key custodians (≥ 2-person co-custody). |
+| 7 | **`trait ProcessProtection` Linux / macOS / Windows skeleton** | implementer / cryptographer | `crates/arkhe-forge-platform/src/process_protection/{linux,macos,windows}.rs` — Linux `mlockall()` + `prctl(PR_SET_DUMPABLE, 0)` + ptrace protection / macOS `PT_DENY_ATTACH` + `VM_MAKE_NOMAP` / Windows `SetProcessMitigationPolicy` + `DebugSetProcessKillOnExit`. Skeleton stage (full impl by L2-complete). HF1 carryover from §15.5. |
+| 8 | **HF2 library PoC (health check + Shamir threshold)** | implementer / cryptographer | `crates/arkhe-forge-platform/src/hf2_kms/` — multi-channel health check (DoH / alternate region / static IP) PoC + `shamir-secret-sharing` integration (`t = 2 of 3` authorisation token). Kept until KMS-integration milestone closes. |
+| 9 | **AEAD AAD 19-byte composition + DEK rotation metric skeleton** | implementer / cryptographer | `crates/arkhe-forge-core/src/pii.rs` — `compute_aad(dek_id, pii_code, aead_kind) -> [u8; 19]` helper + `arkhe_runtime_dek_message_count` counter skeleton. Filled in during the crypto-primitives milestone. |
+| 10 | **Binary reproducibility scope (same machine Linux x86_64)** | implementer / veteran | `scripts/reproduce-build.sh` + `docs/build-reproducibility.md` — defines scope (same machine, same toolchain, same `CARGO_TARGET_DIR`, Linux x86_64 primary). Cross-machine / cross-platform reproducibility is a future-extension stretch. |
+| 11 | **Docs workload distribution (6 alpha-blocker docs × phase mapping)** | implementer / veteran | `docs/alpha-release-schedule.md` — owners / deadlines / phases for the 6 docs. Workstream that runs parallel to Runtime implementation. |
+| 12 | **Single-active L2 SLO suspension policy** | implementer / veteran | `docs/runbook/l2-single-active-operations.md` — convention for temporarily suspending the SLO (p99 projection_lag) during active-passive failover; pin the alert-policy lockout window. |
+| 13 | **`gdpr-crypto-erasure.md` external legal review — 8-week buffer** | implementer / veteran + legal | Lock `docs/Legal/gdpr-crypto-erasure.md` draft completion + 8-week external legal-review window. Milestone fixed at pre-freeze. |
+| 14 | **Future-extension MSRV bump policy** | implementer / theorist | `docs/msrv-policy.md` — re-confirm MSRV 1.80+ pin + future bump conditions (upstream toolchain security patch / crate ecosystem dependence …) + obligation to assess major-version impact at bump time. |
 
 **Completion criterion**: all 14 must land via **PR merge + reviewer
 approval** before the Core-primitives milestone is allowed to begin. If
 anything is missing, team-lead blocks the milestone start. Each PR
-references the matching Origin / Owner / Deliverable columns in its
+references the matching Item / Owner / Deliverable columns in its
 commit message (trace-back).
+
 
 **Rationale**: the Infrastructure milestone is the "before-coding"
 stage. Without the CI gates / test harness / process-protection
@@ -227,7 +228,7 @@ Major crates:
 | `chacha20poly1305` | `^0.10` | XChaCha20-Poly1305 default AEAD (§14.9.1) | C-R5-1 |
 | `aes-gcm-siv` | `^0.11` | AES-GCM-SIV (§14.9.1 AeadKind) | RFC 8452 |
 | `serde` | `^1.0` | — | stable |
-| `arrayvec` | `^0.7` | BoundedString (§3.4, bounded-string-analysis) | theorist recommendation |
+| `arrayvec` | `^0.7` | BoundedString (§3.4, bounded-string-analysis) | bounded-stack pattern |
 | `blake3` | `^1.5` | Chain domain separation + verb allocation | L0 compatibility |
 
 **Rationale**: minor-version breaks are within the Rust crate
@@ -281,8 +282,7 @@ on `unstable`").
 
 ### §5. Public API freeze (two-stage) + deprecation policy
 
-**Decision (auditor M1 / veteran Minor 1 rewording)**: **two-stage
-freeze**.
+**Decision**: **two-stage freeze**.
 
 - **Soft freeze — at the Core-primitives milestone close (Core 5 + Band 1
   pipeline)**: API surface fixed. Subsequent changes require
@@ -357,12 +357,12 @@ TypeCode ranges remain partitioned.
 - Extension traits (e.g. L2 hooks) provide default impls. Shells
   override selectively.
 - Breaking changes go through a new trait + blanket impl migration.
-- **theorist Minor 1**: **changing the semantics of a default-method
-  body is also a breaking change** (observable behaviour shift =
-  downstream behaviour shift). New semantics → new method, keep the
-  old default. After hard freeze, default-body changes are rejected.
+- **Default-method body semantics**: **changing the semantics of a
+  default-method body is also a breaking change** (observable behaviour
+  shift = downstream behaviour shift). New semantics → new method, keep
+  the old default. After hard freeze, default-body changes are rejected.
 
-**Manifest (theorist Minor 2 serde convention)**:
+**Manifest (serde convention)**:
 
 - Every field that can be optional is optional + default. Required
   fields carry a rationale comment.
@@ -409,8 +409,8 @@ inheritance). Older Runtime versions must read newer WALs.
 - Bump `schema_version` for the affected TypeCode pin (A15).
 - Older `schema_version` records are **always** replayable
   (read-forward).
-- **theorist Minor 3 — `schema_version` first field**: every Component
-  / Action / Event struct's **first field is `schema_version: u32`**.
+- **`schema_version` first field**: every Component / Action / Event
+  struct's **first field is `schema_version: u32`**.
   The first 4 bytes of the postcard canonical encoding are the version
   tag — a forward-compat parser reads the version first and branches.
   The `#[derive(...)]` macros validate the first field's name/type at
@@ -589,7 +589,7 @@ route each by class.
 |-------|-------|
 | **Critical** | Immediate patch (emergency micro-patch round) — leader decision. Architect dispatch. |
 | **Major** | Defer to future-extension DIP — workaround within the current release if possible; otherwise temporary fix + future-extension proper resolution. |
-| **Minor** | Absorb into the implementation (architect / implementer judgement). No patch needed. |
+| **Minor** | Absorb into the implementation (team judgement). No patch needed. |
 
 **Patches are not new DIP rounds** — emergency patches are
 housekeeping-level (same scope as the spec-finalisation patch).
@@ -708,7 +708,7 @@ auditor. Especially (7) binary reproducibility externally proves
 
 **Decision**: 4 review checkpoints + a 4-person pre-freeze final.
 
-**Review checkpoints (cryptographer LF1 — Crypto-primitives / 5b split)**:
+**Review checkpoints** (Crypto-primitives / 5b split — see rationale below):
 
 | Checkpoint | Target | Primary reviewer | Goal | SLA |
 |------------|--------|------------------|------|-----|
@@ -935,7 +935,7 @@ $ arkhe-runtime-doctor upgrade-verify
   `unknown_variants` staging (zero data loss).
 - Projection rebuild.
 
-**Downtime SLA (veteran M1 — scale-aware)**:
+**Downtime SLA (scale-aware)**:
 
 | Scale | Total downtime target | L2-completion measurement |
 |-------|-----------------------|---------------------------|
@@ -943,20 +943,20 @@ $ arkhe-runtime-doctor upgrade-verify
 | Beta (1-10 k user) | **~30 min** (replay ~10 min + rebuild ~15 min + buffer ~5 min) | Tier-1 measurement (proportional to WAL size) |
 | Production (100 k+ user) | **separate roadmap** — replay / rebuild parallelisation required (future-extension research item) | Out of current scope |
 
-**Rollback triggers (veteran M1)**:
+**Rollback triggers**:
 
 - **Automatic rollback**: during upgrade — `ReplayError::ManifestDrift`
   / chain-tip mismatch / projection rebuild failure.
 - **Operator-judgment rollback**: when **upgrade time > 2 ×
   tier SLA**, the operator manually rolls back (alpha 20 min / beta
   60 min) — partial-apply state must not persist; at 10 k users a
-  60-min rollback is cheaper than a fresh restart (veteran's
-  operational measurement).
+  60-min rollback is cheaper than a fresh restart (operational
+  measurement target).
 - Rollback itself consumes downtime. `arkhe-runtime-doctor rollback`
   requires an operator Ed25519 signature + `runtime_doctor_journal`
   append.
 
-**L2-completion-stage dogfood measurement requirements (veteran M1)**:
+**L2-completion-stage dogfood measurement requirements**:
 
 - At L2-completion close, BBS dogfood measures upgrade / rollback on
   alpha-tier WAL (~1 k user equivalent).
@@ -1025,12 +1025,12 @@ Six actors × defense posture.
 
 | Actor | Motive | Primary attack path | Defense | Mapped axiom / invariant |
 |-------|--------|---------------------|---------|--------------------------|
-| **1. Malicious shell developer** | Plant a backdoor in a shell | Shell crate impls L0 trait manually | `ActionCompute sealed + derive only` (spec §3.3), cargo-deny CI | R3 theorist C2 |
+| **1. Malicious shell developer** | Plant a backdoor in a shell | Shell crate impls L0 trait manually | `ActionCompute sealed + derive only` (spec §3.3), cargo-deny CI | spec §3.3 / C2 sealed-trait |
 | **2. Malicious runtime operator (insider)** | PII theft / audit tampering | Direct DB manipulation / journal rewrite | `chain_tip_signature` Ed25519 (C3), `runtime_doctor_journal` append-only + chain-signed (§14), multi-party threshold HSM (FG3) | E12 / E13 / S5 |
 | **3. Malicious user** | Compromise the shell via the L4 API | Idempotency collision, GDPR bypass, rate-limit evasion | PG UNIQUE INDEX dedup (§14.8), L1 compute gdpr_status MC (B3 / C3), 3-axis rate limit (§5.2.1) | E-user-3, C3 gate |
 | **4. Network MITM** | L4 traffic theft | Plaintext-Telnet credential sniffing | TLS 1.3+ mandatory (§5.2 GF3), telnet-over-TLS (RFC 2946), WebSocket-over-TLS | GF3 |
 | **5. HSM operator collusion** | Reconstruct DEK (bypass erasure) | t operators collude → master-key export | Threshold HSM (t-of-n Shamir, t = 3 of 5), public transparency log (Sigstore / Rekor), tamper-evident counter | FG3 |
-| **6. L0 kernel bug exploitation** | Trigger an L0 defect via the Runtime | Malformed Extension bytes → panic, WAL chain manipulation | Per-tick atomicity (M9), Extension TypeCode validator log+skip (no panic, §5.5), L0 DO-NOT-TOUCH 8 items (immutable) | M9, §10 |
+| **6. L0 kernel bug exploitation** | Trigger an L0 defect via the Runtime | Malformed Extension bytes → panic, WAL chain manipulation | Per-tick atomicity, Extension TypeCode validator log+skip (no panic, §5.5), L0 DO-NOT-TOUCH 8 items (immutable) | §10 |
 
 **Out of scope**:
 
@@ -1065,7 +1065,7 @@ alpha tag and are part of the long-term scope boundary**.
 | **L0 single-thread throughput** | §10.4 | ~200 Action/s/instance; 10 k+ users → §14.10 Option C read-replica |
 | **Federation unsupported** | §14.10 Option A | Future extension — `SignedArkheUri` + protocol spec + identity federation |
 
-### Implementation TODOs (auditor Minor b classification correction)
+### Implementation TODOs
 
 Items inside the current scope that **must complete** — not Known
 Limitations (resolved before alpha). Aligned with spec §15.5
@@ -1076,7 +1076,7 @@ Limitations (resolved before alpha). Aligned with spec §15.5
 | **`EncryptedPii<T>::decrypt()` tick-anchored manifest resolution** | spec-finalisation patch carryover | cryptographer | Resolve cipher from the **manifest at record-creation tick**, not the current manifest. Old ciphertexts still decode under their old cipher even when the shell manifest changes. Manifest-history table or a `SignatureClassPolicy`-style `PiiCipherPolicy` event chain-anchor. |
 | **HF1 process-protection platform abstraction** | spec §15.5 | cryptographer + veteran | `trait ProcessProtection` + Linux / macOS / Windows impls. See entry-checkpoint item 7 in §10. |
 | **HF4 manifest-bypass audit** | spec §15.5 | cryptographer | When `alpha_credential_rotation_required = false` + `runtime_max ≥ "0.16"`, emit WARN + `runtime_doctor_journal` append. |
-| **`DekMigrationCompleted` event struct formal definition** | §14.7 M-R6-4 Option 2 | cryptographer | TypeCode `0x0003_0F09` already reserved. The struct stabilises when the current-release Option 2 offline batch tool ships. |
+| **`DekMigrationCompleted` event struct formal definition** | spec §14.7 (Option 2) | cryptographer | TypeCode `0x0003_0F09` already reserved. The struct stabilises when the current-release Option 2 offline batch tool ships. |
 
 ### 6 alpha-blocker docs — parallel workstream
 

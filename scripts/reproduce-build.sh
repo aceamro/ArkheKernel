@@ -60,12 +60,14 @@ trap 'rm -f "$FIRST" "${SECOND:-}"' EXIT
 hash_artifacts > "$FIRST"
 cat "$FIRST"
 
-# Leak probe — auditor Defer 2a. `--remap-path-prefix` + `SOURCE_DATE_EPOCH`
-# 둘 다 설정해도 embedded string literal (RFC 3339 date / `env!("HOME")`) 또는
-# 외부 dep 의 하드코딩 경로가 빠져나갈 수 있다. `strings | grep` 으로 가장
-# 흔한 세 leak 패턴 (사용자 home dir / cwd / 최근 2 년 날짜 리터럴) 을 탐지
-# 하되 `::warning::` 으로만 surface — false positive 가능성 때문에 fatal 처리
-# 는 의도적 회피. CI 는 annotation 으로 드러난다.
+# Leak probe. Setting both `--remap-path-prefix` and `SOURCE_DATE_EPOCH`
+# is not always sufficient: an embedded string literal (RFC 3339 date /
+# `env!("HOME")`) or a hardcoded path inside an external dep can still
+# leak into the binary. `strings | grep` covers the three most common
+# leak patterns (user home dir / cwd / recent-year date literals). The
+# probe surfaces via `::warning::` only — false positives are possible,
+# so a fatal exit is intentionally avoided. CI surfaces the warning as
+# an annotation.
 if command -v strings >/dev/null 2>&1; then
   if [[ -f "$BIN_DICE" ]] && strings "$BIN_DICE" | grep -qE "(${HOME}|${PWD}|2025-|2026-)"; then
     echo "::warning::$BIN_DICE contains an absolute path or year literal — reproducibility degraded (see docs/build-reproducibility.md §4)."

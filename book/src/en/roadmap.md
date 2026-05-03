@@ -1,9 +1,9 @@
 # Roadmap
 
-This document records the closing scope of ArkheKernel v0.11 and candidate extensions
+This document records the closing scope of ArkheKernel v0.13 and candidate extensions
 for subsequent work.
 
-## Closing scope — v0.11
+## Closing scope — v0.13
 
 | Scope | Status | Detail |
 | --- | --- | --- |
@@ -16,7 +16,7 @@ for subsequent work.
 
 ## Deferred extensions
 
-Items **excluded** from v0.11. Each item retains a named promotion path.
+Items **excluded** from v0.13. Each item retains a named promotion path.
 
 - **R4-J Subset-Rust pure L1 checker** — statically blocks non-A11 APIs from domain crates;
   promotes `ActionCompute::compute()` purity from SOCIAL-CONTRACT (declaration) to MACHINE-CHECKED.
