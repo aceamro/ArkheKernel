@@ -142,7 +142,9 @@ v0.12 sealing cut.
 | Phase 1 (Foundation) | E.1 + E.2 | `runtime_core.tla` base module + Apalache CI + Kani scaffold | ✅ closed |
 | Phase 2 (TLA+ refinement) | E.3 + E.4 + E.5 + E.6 + E.7 | 5 modules: CR-1 + CR-2 + CR-3 + R4-I + CR-4 | ✅ closed |
 | Phase 3 (Kani implementation proofs) | E.8 | 4-property suite + E.2 workspace fix | ✅ closed |
-| Phase 4 (Cycle close) | E.9 | this section + Layer A verbatim verify + cycle metric | ✅ this commit |
+| Phase 4 (Cycle close) | E.9 | this section + Layer A verbatim verify + cycle metric | ✅ closed (DIP-N5 E.9) |
+
+**Repo-split history note (transparency):** the v0.13 ArkheSourceKernel→ArkheKernel split (initial-commit `eefc929`, 2026-05-03) carried `cr1`/`cr2`/`cr3`/`cr4_*.tla` but transiently dropped two orphan modules — `runtime_core.tla` and `r4_implementation_refinement.tla`. Both were restored in the post-publish CI recovery cycle on 2026-05-04: `a246754` (runtime_core.tla restore + `ci/l0-baseline-hashes.txt` regen for the new repo path) and `ee2687b` (r4_implementation_refinement.tla restore). The Phase 1 + Phase 2 closure claims above describe the substantive verification state — which has held since DIP-N5 E.9 in the prior repo — and are once again backed by every cited module being present in this working tree. See `CHANGELOG.md` and `git log a246754..ee2687b` for the recovery audit trail.
 
 ### Kani 4-property suite ↔ axiom mapping
 

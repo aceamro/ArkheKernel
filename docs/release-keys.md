@@ -218,3 +218,41 @@ The `certificate-identity-regexp` only accepts certificates issued by this repo'
 | On failure | leader rotates manually | Recover the runner OIDC configuration |
 
 Providing both signatures cross-cuts the "HW key compromise" and "Rekor offline" attack paths.
+
+---
+
+## 10. Pre-publish gate (mandatory)
+
+Before any `v*` tag is pushed (which triggers the §9 `release-sign` job) **and** before any `cargo publish` is invoked manually, run:
+
+```bash
+bash scripts/pre-publish-verify.sh
+```
+
+The script runs the same 5 gates that CI enforces, in the same order, and exits non-zero on the first failure. **`cargo publish` is permitted only when the script exits 0.** Pushing a `v*` tag without a green local run is a process violation — CI is the safety-net, not the primary gate.
+
+### 10.1 Gate map
+
+| Gate | Check | CI counterpart |
+|---|---|---|
+| 1/5 | `cargo test --workspace --all-features` | `test` job |
+| 2/5 | `cargo clippy --workspace --all-targets -- -D warnings` | `lint` job |
+| 3/5 | `bash scripts/verify-l0-baseline.sh` (DO-NOT-TOUCH 8 SHA-256) | `l0-baseline` job |
+| 4/5 | `bash scripts/verify-axiom-cite.sh` (axiom inventory ↔ TLA+ INV + Rust impl test 1:1) | axiom-cite step |
+| 5/5 | `apalache-mc typecheck formal/tla-plus/*.tla` | `tla-plus-check` job |
+
+Gate 5 is **SKIP-with-warning** when `apalache-mc` is not installed locally — CI's `tla-plus-check` job remains authoritative. Local installation per `formal/tla-plus/README.md` §Tooling is recommended for full parity.
+
+### 10.2 Operator checklist (per release)
+
+1. `git status` — working tree clean, on the release branch.
+2. `bash scripts/pre-publish-verify.sh` — wait for `[5/5] all gates green`.
+3. `git tag -s v<version>` — sign the tag with `release-signing-v1` (HW key, §1).
+4. `git push origin v<version>` — pushes the signed tag; CI runs the §9 `release-sign` job.
+5. `cargo publish -p <crate>` — in the dependency order documented in §9.2.
+
+If gate 1-5 fails: do **not** delete the failure output — it is the audit trail for the operator log.
+
+### 10.3 Why a separate pre-flight (not just CI)
+
+CI runs after a tag is pushed; a tag push is a public, observable event. A failing gate caught only at CI leaves a published failed-tag in the git history (or worse, a partially published crate set on crates.io). The pre-publish script collapses the round-trip — the same gates run locally, before any external surface is touched.
