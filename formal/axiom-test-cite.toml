@@ -1,6 +1,6 @@
 # formal/axiom-test-cite.toml
 #
-# v0.12 sealing cycle — 12 MC (MACHINE-CHECKED) axioms × TLA+ INV × impl test 1:1 cite
+# 12 MC (MACHINE-CHECKED) axioms × TLA+ INV × impl test 1:1 cite
 #
 # Source-of-truth machine-readable mapping for the CI grep gate verification.
 # Companion to formal/tla-plus/README.md narrative table (E1-E15 ↔ TLA+ INV).
@@ -12,7 +12,7 @@
 
 [meta]
 schema_version = 1
-v0_12_sealed_count = 12
+mc_axiom_count = 12
 formal_method_anchors = "formal/tla-plus/{runtime_core,cr1,cr2,cr3,cr4,r4}.tla"
 spec_anchor = "runtime-book/src/en/architecture/11-axioms.md"
 cycle = "v0.13"
@@ -71,7 +71,7 @@ commit_hash = "26c12a7"
 consent = "user-cited verbatim consent (2026-05-03)"
 rationale = "v0.13 single-fix prep — pre-public-release version anchor align (사용자 directive: 'v0.13 아닌게 존재하지 않게 + 버전업 영구 미발생'). R4-F cycle marker stripped (cycle archaeology cleanup)."
 literal_diff = "FROM b\"arkhe-kernel v0.9 WAL chain domain separation context (R4-F)\" TO b\"arkhe-kernel v0.13 WAL chain domain separation context\""
-chain_invalidation = "Pre-escalation WALs (v0.9 / v0.11 / v0.12 / v0.13-prerelease) NOT replayable. New chain epoch from v0.13. blake3::derive_key(DOMAIN_CTX, world_id) input bytes 변경 → derived chain key 변경 → 모든 prior chain hash mismatch. Acceptable per user directive (pre-public absorption, single-fix forward-only)."
+chain_invalidation = "Pre-escalation WALs (pre-v0.13) NOT replayable. New chain epoch from v0.13. blake3::derive_key(DOMAIN_CTX, world_id) input bytes 변경 → derived chain key 변경 → 모든 prior chain hash mismatch. Acceptable per user directive (pre-public absorption, single-fix forward-only)."
 verify_chain = "byte-level wire format diff + L879 EXPECTED test literal regen (BLAKE3 output) + ci/l0-baseline-hashes.txt regen (DOMAIN_CTX-derived hash) + axiom-cite gate re-run + workflow-3 9-step + step 11 N/A (TLA+ untouched) + step 12 N/A (Kani untouched)"
 spec_anchor = "user directive 2026-05-03 (verbatim consent)"
 
