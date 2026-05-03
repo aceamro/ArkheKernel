@@ -134,5 +134,327 @@ sub_a_invariant = "WalRecordBody (10-field chain hash input) — escalation path
 sub_b_relaxed = "WalRecord wire format (12->13 fields) — RELAXED monotone append-only via V99-1. Future PQC sigs (Hybrid: signature_pqc=Some) append-only; rollback 0."
 
 # ============================================================
-# Formal verification result inventory
+# E1-E15 ↔ TLA+ INV ↔ kernel impl test cite
+#
+# Source-of-truth narrative: formal/tla-plus/README.md §"E1-E15 ↔ TLA+ INV
+# mapping". Kernel-side repopulation (post-split): only TLA+ invariants
+# declared in this repo's `formal/tla-plus/*.tla` modules are cited here,
+# and only impl_tests that live under `arkhe-kernel/` or `arkhe-macros/`.
+# Forge-side anchors (E1-E10 axioms_e_series.rs, hook_host/observer_host
+# witness tests) are inventoried in the sister repo `ArkheForge` toml
+# and intentionally not duplicated here.
 # ============================================================
+
+# ----- E1: Runtime primitive set (definitional foundation) -----
+[E1]
+tier = "MC"
+axiom = "Runtime primitive set = {User, Actor, Space, Entry, Activity}"
+spec_section = "§11.1"
+tla_module = "formal/tla-plus/runtime_core.tla"
+tla_inv = "CONSTANTS_PrimitiveSet"
+tla_note = "definitional CONSTANTS — descriptive name (skipped by grep gate)"
+note = "kernel-side: foundation only; impl-test anchor in sister repo (axioms_e_series.rs)"
+
+# ----- E2: Action::compute pure (subsumed by E14) -----
+[E2]
+tier = "MC"
+axiom = "Every Runtime Action compute inherits A11 pure (subsumed by E14)"
+spec_section = "§11.1"
+tla_module = "formal/tla-plus/cr1_chain_hash_invariant.tla"
+tla_inv = "ChainHashDeterministic_via_E14_subsumption"
+note = "subsumed by E14 ChainHashDeterministic; descriptive name (skipped by grep gate)"
+
+# ----- E3: Cross-layer DAG strictly downward -----
+[E3]
+tier = "MC"
+axiom = "Runtime → L0 strictly downward; L1 → L2 forbidden"
+spec_section = "§11.1"
+tla_module = "formal/tla-plus/r4_implementation_refinement.tla"
+tla_invs = ["LayerImportStrictlyDownward", "ImportDirectionMonotone"]
+note = "kernel TLA+ anchors only; runtime sub-DAG witness lives in sister repo (forge-platform)"
+
+# ----- E5: Actor identity immutable -----
+[E5]
+tier = "MC"
+axiom = "Actor.user_id + Actor.shell_id immutable post-creation"
+spec_section = "§11.2"
+tla_module = "formal/tla-plus/cr2_state_machine_refinement.tla"
+tla_inv = "ActorIdentityImmutable"
+
+# ----- E8: Entry/Space DAG depth-bounded + cycle-free -----
+[E8]
+tier = "MC"
+axiom = "Entry.parent_entry / Space.parent_space cycle-free + depth ≤ 64"
+spec_section = "§11.3"
+tla_module = "formal/tla-plus/r4_implementation_refinement.tla"
+tla_invs = ["EntryParentDagDepthBounded", "EntryParentDagAcyclic"]
+
+# ----- E9: Activity self-loop blocked + meta-verb depth ≤ 8 -----
+[E9]
+tier = "MC"
+axiom = "Activity self-loop blocked + meta-verb depth ≤ manifest cap (1..=8, hard cap 8)"
+spec_section = "§11.3"
+tla_module = "formal/tla-plus/r4_implementation_refinement.tla"
+tla_invs = ["ActivitySelfLoopBlocked", "MetaVerbDepthBounded"]
+
+# ----- E11: Cascade tick deterministic ordering -----
+[E11]
+tier = "MC"
+axiom = "L2 cascade re-submit Op::ScheduleAction Tick(t+1), L0 deterministic order"
+spec_section = "§11.4"
+tla_module = "formal/tla-plus/cr3_replay_determinism.tla"
+tla_inv = "CascadeOpDeterministicTickPlacement"
+impl_tests = [
+    "tick_advance_saturates_without_wrapping",
+    "pop_due_at_exact_tick_pops",
+    "pop_due_ordering_by_tick",
+]
+impl_paths = [
+    "arkhe-kernel/src/abi/ids.rs",
+    "arkhe-kernel/src/state/scheduler.rs",
+]
+note = "kernel-side tick saturation + scheduler ordering witnesses anchor CascadeOp deterministic placement at the L0 layer"
+
+# ----- E12: RuntimeBootstrap chain-anchored + manifest drift rejected -----
+[E12]
+tier = "MC"
+axiom = "(runtime_semver, manifest_digest) chain-anchored via in-band RuntimeBootstrap event; replay drift rejected"
+spec_section = "§11.4"
+tla_module = "formal/tla-plus/cr3_replay_determinism.tla"
+tla_invs = ["RuntimeBootstrapChainAnchored", "ManifestDriftReplayRejected"]
+impl_tests = [
+    "header_carries_magic_and_versions",
+    "wal_attached_kernel_records_committed_step",
+    "wal_kernel_export_then_verify_chain",
+]
+impl_paths = [
+    "arkhe-kernel/src/persist/wal.rs",
+    "arkhe-kernel/src/runtime/kernel.rs",
+]
+note = "wal header carries manifest_digest at byte-pinned offset; kernel export+verify_chain exercises bootstrap commit path"
+
+# ----- E13: SignatureClassPolicy chain-anchored + sticky-Hybrid -----
+[E13]
+tier = "MC"
+axiom = "Shell [audit.signature_class] chain-anchored via SignatureClassPolicy; sticky-Hybrid (post-Hybrid Ed25519 receipts rejected)"
+spec_section = "§11.4 / §14.7 FG5 / §14.11"
+tla_module = "formal/tla-plus/cr3_replay_determinism.tla"
+# E13-1, E13-2, E13-3 INVs (cryptographer cross-review absorbed: HybridDualSignBoth
+# is a real declared positive AND-mode INV, sibling of NoPqcDowngradeAttack).
+tla_invs = [
+    "NoSignatureDowngradeAfterPolicy",
+    "NoPqcDowngradeAttack",
+    "HybridDualSignBoth",
+]
+tla_theorem = "PolicyMonotonic_Derivable"
+# Documentation-only references (script doesn't verify these field names; informational
+# anchors for narrative cross-ref to spec body §14.11 sticky-Hybrid + V99-8 PQC absorb).
+tla_helpers = ["ShellPolicySnapshot", "ShellPolicySnapshotAtTick"]
+tla_event_types = ["SignatureClassPolicyEvent", "AuditReceipt"]
+tla_transitions = ["DeclareSignatureClassPolicy"]
+impl_tests = [
+    # NoPqcDowngradeAttack (E13-2) — downgrade rejection on AND-mode envelope
+    "hybrid_verify_chain_rejects_missing_pqc",
+    "pqc_without_ed25519_envelope_rejected",
+    # HybridDualSignBoth (E13-3) — positive + corruption rejection on each leg
+    "hybrid_verify_chain_and_mode_passes_with_both_valid",
+    "hybrid_verify_chain_rejects_corrupt_pqc_signature",
+    "hybrid_verify_chain_rejects_corrupt_ed25519_when_pqc_valid",
+    # SignatureClass enum surface + sticky-Hybrid envelope construction
+    "signature_class_none_produces_no_signature",
+    "signature_class_ed25519_signs_each_record",
+    "hybrid_signature_class_construct",
+    "hybrid_writer_emits_both_signatures",
+    "ed25519_only_wal_replays_under_hybrid_kernel",
+    # WAL byte-shape pinning of Hybrid layout (NoPqcDowngradeAttack byte-anchor)
+    "wal_record_hybrid_layout_byte_identity",
+    "wal_header_verifying_key_pqc_slot_pinned",
+    # PqcSigner / PqcVerifier sealed-trait witnesses + ML-DSA 65 byte-shape
+    "pqc_signer_trait_software_witness",
+    "pqc_verifier_trait_software_witness",
+    "ml_dsa_65_software_signer_round_trip",
+    "ml_dsa_65_signature_size_3309_bytes",
+    "ml_dsa_65_verifying_key_size_1952_bytes",
+]
+impl_paths = [
+    "arkhe-kernel/src/persist/wal.rs",
+    "arkhe-kernel/src/persist/signature.rs",
+    "arkhe-kernel/src/persist/mod.rs",
+    "arkhe-kernel/src/runtime/kernel.rs",
+    "arkhe-kernel/src/lib.rs",
+]
+note = "Hybrid AND-mode dispatch (Ed25519 + ML-DSA 65 both must pass), no-downgrade tests, and PqcSigner/PqcVerifier sealed-trait witnesses are kernel-side. Byte-shape pinning (3309/1952) is the NoPqcDowngradeAttack anchor at the wire layer. Wire-format byte-pinning attack-vector anchors (truncated header / zeroed PQC slot / wrong-size record) hosted under E14_L2_Allow as Layer A item 8 — wal_record_hybrid_layout_byte_identity + wal_header_verifying_key_pqc_slot_pinned (cross-axiom placement, structural prerequisite for E13 semantic INVs)."
+
+# E13 explicit gap notes (cryptographer cross-review packet absorbed verbatim — silent
+# omission would hide the V99-8 PQC absorption-target boundary from external readers).
+[E13.gap_notes]
+gap_1_no_policy_events_log = "Spec models per-shell `Seq(SignatureClassPolicyEvent)` chain-anchored via DeclareSignatureClassPolicy transition. Impl currently materializes SignatureClass at the WAL-writer level (per-Kernel config), not a per-shell tick-stamped event log. grep `policy_event|PolicyEvent|declare_signature|DeclareSignature|declared_class|shell_policy|policy_snapshot|StickyHybrid` across arkhe-kernel/src/ + arkhe-macros/src/ → 0 matches. Abstraction-refinement gap absorbed by V99-8 (project_v0_12_pqc_absorption_plan cascade)."
+gap_2_e13_1_no_direct_impl_test = "NoSignatureDowngradeAfterPolicy (E13-1) has no direct impl_test — implicit because impl currently lacks the policy_events transition surface. impl_status = spec-ahead-of-impl, V99-8 absorption target."
+gap_3_policy_monotonic_derivable = "PolicyMonotonic_Derivable is a THEOREM (derivable from A14 append-only + integer monotonicity), not an INV — no MC trace, no impl_test required by construction."
+pqc_visibility_status = "PQC surface is NOT silent in impl: MlDsa/Hybrid/pqc_* references span 9+ files, 14+ test fns. Hybrid AND-mode implemented + tested at WAL-writer level. Spec-side policy_events log = v0.13-published abstraction model; impl cascade absorption = V99-8 scope."
+
+# ----- E14.L1-Deny: build-time AST deny-list (subset-rust check) -----
+[E14_L1_Deny]
+tier = "MC"
+axiom = "L1 Action::compute clock/RNG/I/O/FFI deny-list at build time"
+spec_section = "§11.4"
+tla_module = "formal/tla-plus/cr1_chain_hash_invariant.tla"
+tla_inv = "ComputePurityHonored"
+note = "kernel-side TLA+ anchor only; build-time AST deny-list crates (arkhe-subset-rust-check, arkhe-trait-default-check, #[arkhe_pure]) are sister-repo deliverables — impl tests inventoried in ArkheForge toml."
+
+# ----- E14.L2-Allow: runtime sandbox + host-import allow-list ----
+[E14_L2_Allow]
+tier = "MC"
+axiom = "Hook host v2 wasmtime sandbox: NaN canonicalization + SIMD opt-out + host-import allow-list 4-fn"
+spec_section = "§11.4 / §14.5.1"
+tla_module = "formal/tla-plus/cr1_chain_hash_invariant.tla"
+tla_invs = ["ChainHashDeterministic", "HostImportSealed"]
+tla_lemma = "SealedHostLinker_implies_4_set"
+host_imports = [
+    "hook.state.read",
+    "hook.state.write",
+    "hook.emit.extra_bytes",
+    "hook.fuel.consumed",
+]
+e_9_cross_check = "1:1 mapping host-fn 4 ↔ TLA+ HostImports verified at sister-repo capability_linker.rs"
+impl_tests = [
+    # ChainHashDeterministic INV — kernel-side WAL chain hash witnesses
+    "verify_chain_detects_broken_prev_link",
+    "verify_chain_against_wrong_world_id_fails",
+    "verify_chain_validates_signatures",
+    "tampered_record_breaks_verify_chain",
+    "tampered_signature_fails_verify",
+    "missing_signature_fails_verify_when_header_has_key",
+    "wrong_key_fails_verify",
+    "single_append_produces_nonzero_chain_tip",
+    "multi_record_chain_links_each_record",
+    "different_world_id_produces_different_chain",
+    "chain_hash_unchanged_for_ed25519_records",
+    "signature_deterministic_across_runs",
+    # WAL byte-format pinning (Layer A item 8 — A1+E14 upstream)
+    "wal_record_postcard_layout_byte_identity",
+    "wal_record_hybrid_layout_byte_identity",
+    "wal_header_verifying_key_pqc_slot_pinned",
+    "wal_record_postcard_field_order_baseline",
+    # Layer A item 1 (DOMAIN_CTX byte identity — A1+A14 upstream of ChainHashDeterministic)
+    "domain_ctx_byte_identity_blake3",
+    # Layer A item 3 (Principal+KernelEvent+StepStage derives via arkhe-macros)
+    "component_canonical_bytes_pinned",
+    "event_canonical_bytes_pinned",
+]
+impl_paths = [
+    "arkhe-kernel/src/persist/wal.rs",
+    "arkhe-kernel/tests/derive_macros.rs",
+]
+note = "HostImportSealed witnesses (capability_linker sealed-trait) live in sister repo; kernel side anchors ChainHashDeterministic via WAL chain + byte-identity pinning."
+
+# ----- E15: Observer Capability Confinement -----
+[E15]
+tier = "MC"
+axiom = "Observer sandbox: panic close (a) + capability-token confinement (b); chain-non-affecting 4-clause"
+spec_section = "§11.4 / §14.5.2"
+tla_module = "formal/tla-plus/cr4_observer_capability_confinement.tla"
+tla_invs = [
+    "ObserverChainNonAffecting",
+    "ObserverCapabilityConfined",
+    "QuarantineHostSupervised",
+    "CapTokenSealed",
+]
+tla_theorem = "ChainProgressionUnaffectedByObserver"
+tla_lemma = "SealedTrait_implies_E15.b"
+note = "kernel-side TLA+ anchor only; observer host (panic catch + capability linker + wasmtime sandbox) lives in sister repo arkhe-forge-platform/src/observer_host/ — impl tests inventoried in ArkheForge toml."
+
+# ============================================================
+# Non-MC axioms (TYPE-PROVEN / TYPE-ADJACENT / RUNTIME-ASSERTED)
+# Inventoried for completeness; iterated by verify-axiom-cite.sh under
+# the [non_mc_axioms.*] dotted-key path.
+# ============================================================
+[non_mc_axioms]
+
+[non_mc_axioms.E4]
+tier = "TYPE-PROVEN"
+axiom = "UserId / ActorId NonZeroU64-backed (A6)"
+spec_section = "§11.2"
+tla_module = "formal/tla-plus/cr2_state_machine_refinement.tla"
+tla_invs = ["UserIdGloballyUnique", "ActorIdShellUnique"]
+note = "Rust NonZeroU64 typestate enforces uniqueness sentinel-rejection at type level; impl tests live in sister repo (axioms_e_series.rs:122)."
+
+[non_mc_axioms.E6]
+tier = "TYPE-PROVEN"
+axiom = "Actor<_, Authenticated> requires UserBinding (typestate)"
+spec_section = "§11.2"
+tla_module = "formal/tla-plus/cr2_state_machine_refinement.tla"
+tla_inv = "AuthenticatedActorHasUserBinding"
+note = "typestate transitions one-way; sister-repo Kani harness kani_authorize_property complements TLA+ INV."
+
+[non_mc_axioms.E7_submit]
+tier = "TYPE-PROVEN"
+axiom = "Shell isolation submit-site (ShellBrand<'s>)"
+spec_section = "§11.2"
+tla_module = "formal/tla-plus/cr2_state_machine_refinement.tla"
+tla_inv = "ShellBrandConsistent"
+note = "ShellBrand invariant lifetime closes brand scope at type level."
+
+[non_mc_axioms.E7_replay]
+tier = "RUNTIME-ASSERTED"
+axiom = "Shell isolation replay-time (RA fallback)"
+spec_section = "§11.2"
+tla_module = "formal/tla-plus/cr2_state_machine_refinement.tla"
+tla_inv = "ShellIsolationOnReplay"
+note = "RA fallback — replay-time check; impl in compute path (sister-repo)."
+
+[non_mc_axioms.E10]
+tier = "TYPE-ADJACENT"
+axiom = "ArkheUri 3-tuple (instance, shell, local)"
+spec_section = "§11.3"
+note = "type-system level, no TLA+ INV; impl test e10_arkhe_uri_typecode_registry_structured lives in sister repo."
+
+# ============================================================
+# Kani 5-property suite (sister-repo arkhe-runtime-proofs anchor)
+# Skipped by verify-axiom-cite.sh iteration (informational only).
+# ============================================================
+[kani_5_property]
+description = "Implementation-level proof suite (TLA+ refinement complement) — lives in sister repo arkhe-runtime-proofs/src/lib.rs"
+location = "../ArkheForge/arkhe-runtime-proofs/src/lib.rs (sister repo)"
+
+[kani_5_property.kani_authorize_property]
+axiom = "E6 + E7 typestate"
+tla_anchor = "AuthenticatedActorHasUserBinding + ShellBrandConsistent"
+tla_module = "formal/tla-plus/cr2_state_machine_refinement.tla"
+
+[kani_5_property.kani_dispatch_property]
+axiom = "E14 Compute Determinism"
+tla_anchor = "ChainHashDeterministic"
+tla_module = "formal/tla-plus/cr1_chain_hash_invariant.tla"
+
+[kani_5_property.kani_replay_property]
+axiom = "A1 bit-identical replay (E14 ⇒ A1)"
+tla_anchor = "ChainHashDeterministic"
+tla_module = "formal/tla-plus/cr1_chain_hash_invariant.tla"
+
+[kani_5_property.kani_memory_bounds_check_property]
+axiom = "E14.L2 (firm contract anchor)"
+tla_anchor = "ChainHashDeterministic (runtime sandbox boundary)"
+tla_module = "formal/tla-plus/cr1_chain_hash_invariant.tla"
+
+[kani_5_property.kani_hybrid_and_mode_property]
+axiom = "E13 Hybrid AND-mode dispatch"
+tla_anchor = "HybridDualSignBoth + NoPqcDowngradeAttack"
+tla_module = "formal/tla-plus/cr3_replay_determinism.tla"
+
+# ============================================================
+# Formal verification result inventory (cycle close summary)
+# ============================================================
+[formal_verification_inventory]
+date = "2026-04-26"
+cycle = "v0.13"
+formal_modules = 6
+tla_invs = 17
+tla_theorems = 2
+tla_lemmas = 2
+kani_properties = 5
+adversary_axes_closed = 3
+e_axioms_anchored = 12
+non_anchored_e_axioms = ["E1 (definitional)", "E2 (subsumed by E14)", "E10 (TYPE-ADJACENT)"]
+l0_a_axioms_anchored = 10
+note = "kernel repopulation 2026-05-04: E1-E15 cite section restored from README source-of-truth + kernel-side impl test inventory (Forge-side tests deferred to ArkheForge toml)."
