@@ -1,0 +1,48 @@
+# L0 Baseline Hashes — arkhe-kernel/src/**/*.rs + arkhe-macros/src/**/*.rs
+#
+# Reference: ArkheKernel rename (Round 5) — baseline regenerated to match
+# the new crate name. L0 DO NOT TOUCH 8-item protection — CI gate baseline
+# for the L0 modification prohibition directive. When a PR includes L0
+# file changes against this baseline, the "L0 DIP companion declaration
+# obligation" CI warning fires.
+# Format: `<sha256>  <path>` — verbatim from `shasum -a 256` output.
+#
+# arkhe-macros/src/lib.rs (Layer A item 3 derive body) included from
+# v0.13 sealing baseline.
+#
+# Update procedure: regenerate baseline + auditor approval PR after the
+# L0-specific DIP completes and L0 release proceeds.
+# Update command: find arkhe-kernel/src arkhe-macros/src -name "*.rs" -print0 | sort -z | xargs -0 shasum -a 256 > ci/l0-baseline-hashes.txt
+#          Then reinsert this header block.
+3d87edec17efd42fff375ee36849ff9aec911f7b34ceeff88791687d33f0a06b  arkhe-kernel/src/abi/caps.rs
+c94a2c042718eee42d56d411775896c4f451041c9848e52bbf27a051dabdd424  arkhe-kernel/src/abi/error.rs
+85e4f1abdbfb009a09a69acf5b662f1d72651953a59227470e635244e4394f3f  arkhe-kernel/src/abi/ids.rs
+db625bc5f6fc90307568e611db4cb7069de73d92d44f6687b11f28ad4662a94f  arkhe-kernel/src/abi/mod.rs
+1b39d3e92ab3646e74310d84898f1ee629721c3274b6d22540913d42ca13ab24  arkhe-kernel/src/abi/principal.rs
+fe2ebd6f9d2f252a980b830c4e84339479707fceeea0d9c95ebfbb5387d17be3  arkhe-kernel/src/lib.rs
+d27b1c57cac27104d0a145dbbd979b2c54b438bc63b62c1fe0e9b49df3b1a2c4  arkhe-kernel/src/persist/mod.rs
+0a6a7df770f082c4128a568d6509b79fbebf294d0bfa7ef22120b0b762ac9b2b  arkhe-kernel/src/persist/replay.rs
+654b698d8b704889bae7c613825a7ea608a1589bf1197c41e98e5e80d613ed5f  arkhe-kernel/src/persist/signature.rs
+3ad7bfd7ca7ed596050e8261df18f30c9785f078a4d0d854351075afb1c5273e  arkhe-kernel/src/persist/snapshot.rs
+2bed63790f1ccff4d60b31bad1693e3823cf381f112a06dcc17484b9a3ed6cc9  arkhe-kernel/src/persist/wal.rs
+c5b206b8048b22d8be4465e8e77b21d56068c246173088f7b26d6c8f3596d937  arkhe-kernel/src/runtime/apply.rs
+f039b7a3fe1bdccf0f4d8f7e62cb326b41f7cc5d0d0bffa406524a20f3c0d2ce  arkhe-kernel/src/runtime/dispatch.rs
+13a897b37e10372ea0abd2a7a311a67d16fb5c8c8c9f0ac319b6e47698bbf345  arkhe-kernel/src/runtime/event.rs
+8734fd531b523f986101f9f30109c14b0620b8330d5dbaa72ba431f6006b9e57  arkhe-kernel/src/runtime/kernel.rs
+1b5d9ae3ca1ae64825b9786429b77a33d8fc8c3e02c0b5a46d4c1696fb1c8d34  arkhe-kernel/src/runtime/mod.rs
+e89e0ae1f4886409216b41d6eb80b5abd307404f4467a04338fabb444f3bd570  arkhe-kernel/src/runtime/observer.rs
+2fa35b3ecc47c791daf7cf983bdbb306705463b151377127b9ef05d0be813efa  arkhe-kernel/src/runtime/registry.rs
+08a29223de1adf83f59dd7aa7f6fdac34637ec3b2473f0899b0dd5ee91559a00  arkhe-kernel/src/runtime/stage.rs
+6efe3afaee973537b5628929316522e17461675d619653a1e022c745caa65cef  arkhe-kernel/src/runtime/view.rs
+f84c8d45259de5993e984301af60198e94aa4aeeb33fd80ac647be9957cad815  arkhe-kernel/src/state/authz.rs
+ff80b8b246c2661bb9a233f2fa217efa0f85f0f922f50fc49a4d46724960c0e3  arkhe-kernel/src/state/config.rs
+3ec9c8a0fed246984b5f33bc04884f141ecb88560da256551709197fc67b34b6  arkhe-kernel/src/state/context.rs
+d7e69179e4d5e6b325cae4fd307a24f45e8a84974db2e9ecfcfe1ee18b0e0c39  arkhe-kernel/src/state/instance.rs
+a84d42343dc264ceca49b0d4bfd864ce68c32153852c546e1a3b00b79ea09fe4  arkhe-kernel/src/state/ledger.rs
+dc9b3410e76b947643d17944c36681a558c3048faa84ad74a4fc464214aeca79  arkhe-kernel/src/state/mod.rs
+75554f15ecdeac0043e88d38b9e78e6d939cfceeca8ae4c28704043465f23d57  arkhe-kernel/src/state/op.rs
+0d10181fcaa3b3a89a220abc9c98e720b630b7605d1b2626087eae90748a39a7  arkhe-kernel/src/state/quota.rs
+9fecdfc11ac1e1af27d0a1d39080be008ef6c44e432e657dba96602f8cf08a74  arkhe-kernel/src/state/scheduler.rs
+caedd4127a162f440912ebdb1bb954b9bf0099a8f0af09584d061aad1b18585d  arkhe-kernel/src/state/scope.rs
+a021ca026942e35f2a7ada3d18a6cbcad488317bf118633f3f69b5e9c41b4780  arkhe-kernel/src/state/traits.rs
+48ff1d6c627eda573ab27f6af8b89749c3289ff8203e7ca8f862f7619118d1a7  arkhe-macros/src/lib.rs

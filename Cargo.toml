@@ -1,0 +1,36 @@
+[workspace.package]
+# Shared package metadata. Crate-level Cargo.toml inherits via
+# `<field>.workspace = true`. Pinning `rust-version` here makes
+# `cargo build` refuse pre-1.80 toolchains up front instead of
+# failing later inside the compiler — see `docs/msrv-policy.md`.
+rust-version = "1.80"
+edition      = "2021"
+
+[workspace]
+resolver = "2"
+members = [
+    "arkhe-kernel",
+    "arkhe-macros",
+
+    # L1 demo example (D1-Total bit-identical replay proof).
+    "examples/dice",
+]
+
+# Workspace dependency version pinning (shared, kernel scope).
+[workspace.dependencies]
+serde              = { version = "1.0",  features = ["derive"] }
+postcard           = { version = "1.0",  features = ["use-std"] }
+blake3             = "1.5"
+ed25519-dalek      = { version = "2",    default-features = false, features = ["std"] }
+bytes              = { version = "1.7",  features = ["serde"] }
+bitflags           = { version = "2.6",  features = ["serde"] }
+
+# Clippy workspace lints (opt-in via `[lints] workspace = true` per crate).
+# L0 crates do not opt in — preserving the L0 DO NOT TOUCH boundary.
+[workspace.lints.clippy]
+unwrap_used     = "deny"
+expect_used     = "deny"
+panic           = "deny"
+todo            = "deny"
+unimplemented   = "deny"
+dbg_macro       = "deny"

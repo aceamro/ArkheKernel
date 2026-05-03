@@ -1,0 +1,22 @@
+[package]
+name = "arkhe-macros"
+version = "0.13.0"
+edition = "2021"
+rust-version.workspace = true
+description = "Derive macros for ArkheKernel: ArkheAction / ArkheComponent / ArkheEvent. Companion crate to arkhe-kernel."
+keywords = ["derive", "proc-macro", "kernel", "arkhe-kernel"]
+categories = ["development-tools::procedural-macro-helpers"]
+repository = "https://github.com/aceamro/ArkheKernel"
+homepage = "https://github.com/aceamro/ArkheKernel"
+documentation = "https://docs.rs/arkhe-macros"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+authors = ["Arkhe Contributors"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "2"
+quote = "1"
+proc-macro2 = "1"

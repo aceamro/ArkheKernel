@@ -1,0 +1,9 @@
+# Test Count Baselines — `cargo test --workspace` matrix per feature config
+#
+# kernel-only workspace (3 crates: arkhe-kernel + arkhe-macros + examples/dice).
+# Format: `<config-name>=<count>` — KEY=VALUE per line.
+# Drift = CI fail forced (operator updates baseline + verifies Layer A/L0 invariants).
+# Update procedure: cargo test --workspace <flags> 2>&1 | grep -E "^test result:" | awk '{s+=$4} END {print s}'
+
+default=227
+all-features=227

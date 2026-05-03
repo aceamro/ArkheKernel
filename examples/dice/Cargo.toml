@@ -1,0 +1,21 @@
+[package]
+name = "dice-domain"
+version = "0.13.0"
+edition = "2021"
+rust-version.workspace = true
+description = "L1 deterministic-integrity example — WAL replay yields a bit-identical chain tip (A1 D1-Total proof)."
+repository = "https://github.com/aceamro/ArkheKernel"
+homepage = "https://github.com/aceamro/ArkheKernel"
+license = "MIT OR Apache-2.0"
+authors = ["Arkhe Contributors"]
+publish = false
+
+[dependencies]
+arkhe-kernel = { path = "../../arkhe-kernel", version = "0.13" }
+serde    = { workspace = true }
+postcard = { workspace = true }
+bytes    = { workspace = true }
+blake3   = { workspace = true }
+
+[lints]
+workspace = true

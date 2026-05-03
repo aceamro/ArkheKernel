@@ -1,0 +1,13 @@
+[book]
+title = "ArkheKernel"
+authors = ["aceamro"]
+language = "en"
+src = "src/en"
+description = "Domain-neutral, deterministic microkernel for virtual worlds"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/aceamro/ArkheKernel"
+edit-url-template = "https://github.com/aceamro/ArkheKernel/edit/main/book/{path}"
+no-section-label = false

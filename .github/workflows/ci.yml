@@ -1,0 +1,406 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # DIP-N6 M5.1 — 7-config test matrix. Each matrix job runs
+  # `cargo test --workspace <flags>` for one umbrella feature combo and
+  # asserts the passed test count matches `ci/test-baselines.txt` (drift
+  # forces operator update + Layer A/L0 verify). PR=fail-fast (dev iterates
+  # faster) / main=no fail-fast (full postmortem coverage).
+  test:
+    name: test (${{ matrix.config.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: ${{ github.event_name == 'pull_request' }}
+      matrix:
+        config:
+          - { name: default,      flags: "" }
+          - { name: all-features, flags: "--all-features" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target (per-config)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ matrix.config.name }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.config.name }}-
+
+      - run: cargo build --workspace ${{ matrix.config.flags }}
+
+      - name: Test + baseline assertion (config = ${{ matrix.config.name }})
+        env:
+          PROPTEST_CASES: "256"
+          PROPTEST_MAX_SHRINK_ITERS: "2048"
+          PROPTEST_SEED: "arkhe-kernel"
+          PROPTEST_RNG_ALGORITHM: "xor_shift"
+          PROPTEST_FORK: "1"
+        run: |
+          set -euo pipefail
+          cargo test --workspace ${{ matrix.config.flags }} 2>&1 | tee /tmp/test.log
+          # M5.1 (DIP-N6) — task #73 verified parse pattern + C5+ guards
+          # (CRLF-safe `tr -d` + empty-baseline guard).
+          actual=$(grep -E "^test result:" /tmp/test.log | awk '{s+=$4} END {print s+0}')
+          expected=$(grep -E "^${{ matrix.config.name }}=" ci/test-baselines.txt | cut -d= -f2 | tr -d ' \t\r\n')
+          if [ -z "$expected" ]; then
+            echo "::error::Baseline missing for config '${{ matrix.config.name }}' in ci/test-baselines.txt"
+            echo "::error::Add new line in format: <config-name>=<count>"
+            exit 1
+          fi
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::Test count mismatch for ${{ matrix.config.name }}: expected=$expected actual=$actual"
+            echo "::error::Update ci/test-baselines.txt + verify Layer A/L0 invariants if intentional."
+            exit 1
+          fi
+          echo "::notice::${{ matrix.config.name }} test count = $actual (matches baseline)"
+
+  # DIP-N6 M5.1 — config-independent lint axis split out of the matrix
+  # `test` job. fmt/clippy/doc/compile-check are not feature-flag dependent,
+  # so running them once (here) avoids 7x redundancy under the matrix.
+  lint:
+    name: lint + doc + compile-check (config-independent)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-lint-
+
+      # arkhe-kernel + arkhe-macros 는 기존 fmt convention 보존
+      # (L0 + proc-macro 의 syn 패턴 유지). examples/dice 만 rustfmt default 검증.
+      - run: cargo fmt -p dice-domain -- --check
+
+      - run: cargo clippy --workspace --no-deps --all-targets -- -D warnings
+
+      - name: Build rustdoc (warnings are fatal)
+        run: cargo doc --no-deps --workspace
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+      - name: Run demos (smoke)
+        run: |
+          cargo run --quiet -p dice-domain | tail -5
+
+      # DIP-N6 M5.4 — Script integrity verify (cryptographer LEAD). Header
+      # 주석 제거 후 shasum -c 로 검증 (verify-l0-baseline 패턴 carry).
+      # Mismatch = silent tampering 또는 의도적 변경 미반영 → CI fail.
+      - name: Verify CI script integrity (M5.4)
+        run: grep -v '^#' ci/scripts-baseline-hashes.txt | grep -v '^[[:space:]]*$' | shasum -a 256 -c
+
+      # DIP-N6 M5.3 — Axiom inventory ↔ TLA+ INV + Rust impl test 1:1 grep gate.
+      # Verifies that every cited TLA+ identifier appears in its `tla_module`
+      # file and every cited impl_test appears as `fn <name>` in at least one
+      # cited impl_path. Source-of-truth = `formal/axiom-test-cite.toml` (M5.2
+      # deliverable). config-independent (TOML parse + grep, no feature flags).
+      - name: Verify axiom-test cite mapping (M5.3)
+        run: bash scripts/verify-axiom-cite.sh
+
+  supply-chain:
+    name: supply-chain (cargo-deny + cargo-vet)
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo bin + registry (cargo-deny / cargo-vet / cargo-depgraph)
+        # `~/.cargo/bin` keeps the installed CLIs (saves ~1 min/run);
+        # `~/.cargo/registry` keeps cargo-vet's import index fetched from
+        # google / mozilla / bytecode-alliance so transient git latency does
+        # not flake the supply-chain job.
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+          key: ${{ runner.os }}-supply-chain-v1-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-supply-chain-v1-
+
+      - name: Install cargo-deny
+        run: command -v cargo-deny || cargo install --locked cargo-deny
+
+      - name: cargo-deny (bans / licenses / sources / advisories)
+        run: cargo deny check
+
+      - name: Install cargo-vet
+        run: command -v cargo-vet || cargo install --locked cargo-vet
+
+      # `cargo vet check` advisory mode. 5 crypto crates (ed25519-dalek /
+      # blake3 / aes-gcm / chacha20poly1305 / zeroize) are audited in
+      # `supply-chain/audits.toml`; transitive deps remain on Google /
+      # Mozilla / Bytecode Alliance imports. Failure surfaces as a warning
+      # — the gate flips to mandatory once the exemption set has been
+      # pruned to zero (operator decision, post-tag).
+      - name: cargo-vet (advisory)
+        run: cargo vet check || echo "::warning::cargo vet check has unresolved exemptions"
+
+  l0-baseline:
+    name: L0 baseline hashes check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify L0 baseline SHA-256 hashes
+        run: ./scripts/verify-l0-baseline.sh
+
+  # DIP-N5 sub-step E.1 — TLA+ refinement spec gate. Runs Apalache
+  # `typecheck` on every `formal/tla-plus/*.tla` file. Bounded MC
+  # (`apalache-mc check --inv=...`) lands per-module from E.3 onward.
+  # Apalache 0.57.0 jar pinned by SHA-256 hash from the official release
+  # `sha256sum.txt` (auditor C2 — full SHA-256 verify before extract).
+  tla-plus-check:
+    name: TLA+ Apalache typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 17 (Apalache prerequisite)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Apalache 0.57.0 archive
+        id: cache-apalache
+        uses: actions/cache@v4
+        with:
+          path: ~/.apalache
+          key: ${{ runner.os }}-apalache-0.57.0
+
+      - name: Download Apalache 0.57.0 + verify SHA-256
+        if: steps.cache-apalache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.apalache
+          cd ~/.apalache
+          # SHA-256 from
+          # https://github.com/apalache-mc/apalache/releases/download/v0.57.0/sha256sum.txt
+          # (auditor C2 — digest 만으로 약함, full SHA-256 verify).
+          APALACHE_VERSION="0.57.0"
+          APALACHE_TGZ="apalache-${APALACHE_VERSION}.tgz"
+          APALACHE_SHA256="b0eab09c832750cb731786480c48a2768a48d77016b48475fb3945166e350244"
+          wget -q "https://github.com/apalache-mc/apalache/releases/download/v${APALACHE_VERSION}/${APALACHE_TGZ}"
+          echo "${APALACHE_SHA256}  ${APALACHE_TGZ}" | sha256sum -c -
+          tar xzf "${APALACHE_TGZ}"
+
+      - name: Apalache typecheck on each formal/tla-plus/*.tla
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.apalache/apalache-0.57.0/bin:$PATH"
+          for f in formal/tla-plus/*.tla; do
+            echo "::group::apalache-mc typecheck $f"
+            apalache-mc typecheck "$f"
+            echo "::endgroup::"
+          done
+
+  reproducibility:
+    name: binary reproducibility (Linux x86_64)
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # SOURCE_DATE_EPOCH relies on the HEAD commit timestamp being
+          # recoverable via `git log -1 --format=%ct`.
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-repro-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-repro-
+
+      - name: Double-build dice + sha256sum compare
+        run: ./scripts/reproduce-build.sh
+
+  release-sign:
+    name: release signing (Sigstore keyless cosign)
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [test, lint, reproducibility, supply-chain, l0-baseline]
+    permissions:
+      contents: read
+      # OIDC token for keyless cosign signing (Sigstore Fulcio).
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Build release binaries (deterministic)
+        run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct HEAD)"
+          export RUSTFLAGS="--remap-path-prefix=$HOME=/build --remap-path-prefix=$PWD=/build"
+          cargo build --release --locked -p dice-domain
+
+      - name: Package publish-true crates (dependency order)
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/crates
+          # Publish order: leaves first so each `cargo publish --dry-run` can
+          # resolve its path-dep siblings from crates.io after the previous
+          # actual publish. `--dry-run` here only assembles + validates the
+          # `.crate`; the actual publish happens in a separate operator-gated
+          # workflow (see docs/release-keys.md §9).
+          publish_order=(
+            arkhe-macros
+            arkhe-kernel
+          )
+          for crate in "${publish_order[@]}"; do
+            cargo publish --dry-run --allow-dirty --no-verify -p "$crate" || {
+              echo "::warning::cargo publish --dry-run for $crate failed (path-dep not yet on crates.io, transient network, registry throttling, or any other cause); defensively skipping crate tarball signing for $crate."
+              continue
+            }
+            cp "target/package/${crate}-0.13.0.crate" "artifacts/crates/" || true
+          done
+
+      - name: Copy release binaries
+        run: |
+          mkdir -p artifacts/bin
+          cp target/release/dice-domain  artifacts/bin/
+
+      - name: Sign binaries + available crate tarballs (Sigstore keyless)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for f in artifacts/bin/* artifacts/crates/*; do
+            cosign sign-blob --yes \
+              --bundle "${f}.cosign.bundle" \
+              "$f"
+          done
+
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: arkhe-release-${{ github.ref_name }}
+          path: artifacts/
+
+  # Pages job is deferred until post-v0.12. The repo is private under a
+  # plan tier that does not include Pages, so `actions/configure-pages`
+  # cannot enable a site (default GITHUB_TOKEN lacks admin scope and the
+  # repo Settings -> Pages source picker is unavailable). Re-enable
+  # after v0.12 cut by deciding repo visibility (public) or plan
+  # upgrade.
+  pages:
+    name: build + deploy GitHub Pages
+    if: false
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target + mdbook bin
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/mdbook
+            target
+          key: ${{ runner.os }}-pages-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pages-
+
+      - name: Install mdbook
+        run: |
+          if ! command -v mdbook >/dev/null 2>&1; then
+            cargo install mdbook --locked --version ^0.5
+          fi
+
+      - name: Build L0 kernel mdBook
+        working-directory: book
+        run: mdbook build
+
+      - name: Build rustdoc
+        run: cargo doc --no-deps --workspace
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+      - name: Assemble deployment directory
+        run: |
+          mkdir -p _site
+          cp -r book/book _site/book
+          cp -r target/doc _site/api
+          cat > _site/index.html <<'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta http-equiv="refresh" content="0; url=book/">
+            <title>ArkheKernel</title>
+          </head>
+          <body>
+            <p>Redirecting to <a href="book/">L0 kernel book</a>
+            / <a href="api/arkhe_kernel/">API reference</a>.</p>
+          </body>
+          </html>
+          EOF
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

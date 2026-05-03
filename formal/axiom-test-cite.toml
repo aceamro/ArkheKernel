@@ -1,0 +1,138 @@
+# formal/axiom-test-cite.toml
+#
+# v0.12 sealing cycle — 12 MC (MACHINE-CHECKED) axioms × TLA+ INV × impl test 1:1 cite
+#
+# Source-of-truth machine-readable mapping for the CI grep gate verification.
+# Companion to formal/tla-plus/README.md narrative table (E1-E15 ↔ TLA+ INV).
+#
+# Anchored to:
+#   - runtime-book/src/en/architecture/11-axioms.md (E1-E15)
+#   - formal/tla-plus/{runtime_core,cr1,cr2,cr3,cr4,r4}.tla (TLA+ refinement)
+#   - arkhe-runtime-proofs/src/lib.rs (Kani 4-property suite)
+
+[meta]
+schema_version = 1
+v0_12_sealed_count = 12
+formal_method_anchors = "formal/tla-plus/{runtime_core,cr1,cr2,cr3,cr4,r4}.tla"
+spec_anchor = "runtime-book/src/en/architecture/11-axioms.md"
+deliverable_date = "2026-04-26"
+cycle = "v0.13"
+
+# ============================================================
+# CR-N anchors — Cryptographic refinement primitive class siblings
+# (impl-cite anchors for crypto primitives that the chain hash /
+#  signature pipeline treats as black boxes — no spec body lemma,
+#  no TLA+ INV at this anchor class. PQC Hybrid entry will add
+#  HybridDualSignBoth_implies_* lemma in cr1.tla or cr3.tla, at
+#  which point step 11 typecheck becomes mandatory.)
+# ============================================================
+[cr_anchors]
+description = "Cryptographic refinement primitive anchors (CR-N class siblings)"
+
+[cr_anchors.cr_c2]
+description = "Signature verification primitive class (Ed25519 + Hybrid AND-mode dispatch)"
+location = "arkhe-kernel/src/persist/signature.rs::VerifierClass::verify + verify_hybrid"
+sibling = "CR-1 (ChainHashFn, item 8)"
+axioms_indirect = ["A1", "A16"]
+e_inheritance_indirect = ["E12", "E14"]
+hybrid_extension = "Hybrid variant + dual-sign AND-mode verify path (Ed25519 + MlDsa65 both must pass)"
+note = "crypto-primitive black-box, axiom black-box treatment"
+
+[cr_anchors.cr_pqc_hsm_extension]
+description = "HSM/KMS PQC provider trait (forward-compat for v0.13+ providers)"
+location = "arkhe-kernel/src/persist/signature.rs::PqcSigner / PqcVerifier (sealed traits, see L80-89 + L91-96)"
+sealed_trait_pattern = "private_seal::Sealed bound prevents external impl injection (e.g., compromised HSM impl from other crate cannot register) — sibling A24 lineage"
+status = "deferred — current impl = SoftwareMlDsa65{Signer,Verifier}; HSM/KMS impls land via separate sealed-trait extension"
+note = "no axiom anchor this cycle; sealed-trait safeguard + private module bound = security boundary mechanism"
+
+# ============================================================
+# E1 — Core 5 primitive set (definitional foundation)
+# ============================================================
+# ============================================================
+# Layer A — Kernel byte-identity catastrophic invariants (8 items)
+# Single source of truth for L0 immutable byte-level anchors.
+# ============================================================
+
+[layer_a_items]
+total_items = 8
+formal_anchored = 5
+type_or_doc_only = 3
+
+[layer_a_items.item_1]
+name = "DOMAIN_CTX literal"
+formal_anchor = true
+axioms = ["A1", "A14"]
+e_inheritance = ["E14"]
+cite_anchor = "domain_ctx_byte_identity_blake3 (arkhe-kernel/src/persist/wal.rs::tests)"
+note = "byte-level formal anchor via BLAKE3 frozen-hex regression test (type-level identity promoted to formal anchor; A1 chain hash determinism upstream + A14 canonical bytes pinning)"
+
+[layer_a_items.item_1.escalation_event]
+date = "2026-05-03"
+commit_hash = "26c12a7"
+consent = "user-cited verbatim consent (2026-05-03)"
+rationale = "v0.13 single-fix prep — pre-public-release version anchor align (사용자 directive: 'v0.13 아닌게 존재하지 않게 + 버전업 영구 미발생'). R4-F cycle marker stripped (cycle archaeology cleanup, M11-COMMENT-CLEANUP family scope)."
+literal_diff = "FROM b\"arkhe-kernel v0.9 WAL chain domain separation context (R4-F)\" TO b\"arkhe-kernel v0.13 WAL chain domain separation context\""
+chain_invalidation = "Pre-escalation WALs (v0.9 / v0.11 / v0.12 / v0.13-prerelease) NOT replayable. New chain epoch from v0.13. blake3::derive_key(DOMAIN_CTX, world_id) input bytes 변경 → derived chain key 변경 → 모든 prior chain hash mismatch. Acceptable per user directive (pre-public absorption, single-fix forward-only)."
+verify_chain = "byte-level wire format diff + L879 EXPECTED test literal regen (BLAKE3 output) + ci/l0-baseline-hashes.txt regen (DOMAIN_CTX-derived hash) + axiom-cite gate re-run + workflow-3 9-step + step 11 N/A (TLA+ untouched) + step 12 N/A (Kani untouched)"
+spec_anchor = "user directive 2026-05-03 (verbatim consent)"
+
+[layer_a_items.item_2]
+name = "InvariantLifetime variance"
+formal_anchor = false
+note = "variance type-level"
+
+[layer_a_items.item_3]
+name = "Principal+KernelEvent+StepStage derives"
+formal_anchor = true
+axioms = ["A1", "A6", "A14", "A23"]
+e_inheritance = ["E4", "E11", "E12", "E13", "E14"]
+derive_macro_baseline = "32 files"
+cite_anchor = "component_canonical_bytes_pinned + event_canonical_bytes_pinned (arkhe-kernel/tests/derive_macros.rs — A1+A14 byte-identity witness via ArkheComponent/ArkheEvent synthetic fixtures; full A1+A6+A14+A23 protection retained)"
+
+[layer_a_items.item_4]
+name = "A11 MC tag"
+formal_anchor = true
+axioms = ["A11"]
+e_inheritance = ["E14 (subsumes E2)"]
+
+[layer_a_items.item_5]
+name = "ROADMAP v0.99+ Deferred"
+formal_anchor = false
+note = "documentation"
+
+[layer_a_items.item_6]
+name = "R4-X DAG"
+formal_anchor = true
+scope = "L0-internal 4-stratum (abi/state/runtime/persist)"
+sibling_to = "E3 cross-layer 3-tier (post-N6.2 Option B+ reconciliation)"
+e_inheritance = []
+
+[layer_a_items.item_7]
+name = "EventMask bit allocation"
+formal_anchor = false
+note = "implementation bit allocation"
+
+[layer_a_items.item_8]
+name = "WalRecord postcard field order"
+formal_anchor = true
+axioms = ["A1"]
+e_inheritance = ["E14"]
+cite_anchor = "CR-1 ChainHashFn (BLAKE3 keyed_hash over postcard-encoded WalRecord) + wal_record_postcard_field_order_baseline (arkhe-kernel/src/persist/wal.rs::tests)"
+
+[layer_a_items.item_8.escalation_event]
+date = "2026-05-02"
+commit_hash = "e63e542"
+consent = "user-cited verbatim consent (leader cite, commit body archaeology)"
+rationale = "PQC enabling — V99-8 (Hybrid Ed25519 + ML-DSA 65, NIST CNSA 2.0) sibling introduction. Forward-only schema (pre-V99-1 WALs not replayable, v0.12 pre-public absorb)."
+layout_option = "A — append signature_pqc:Option<Vec<u8>> field 13 to WalRecord + verifying_key_pqc:Option<Vec<u8>> field 11 to WalHeader. WalRecordBody 10-field order UNCHANGED."
+invariant_preserved = "WalRecordBody chain hash input bytes IDENTICAL pre/post V99-1; A1 bit-identical replay holds for V99-1+ WALs. Pre-V99-1 WALs = separate epoch."
+verify_chain = "cryptographer §1 byte-level diff + theorist §4 cr1+cr3 comment block update + auditor workflow-3 9-step + step 10 axiom-cite gate + step 11 apalache typecheck PASS"
+spec_anchor = "runtime-book/.../14-open-questions.md L375 + L401 (L0 DIP requirement satisfied via V99-1)"
+
+[layer_a_items.item_8.dual_layer_protection]
+sub_a_invariant = "WalRecordBody (10-field chain hash input) — escalation pathway NEVER applied. ChainHashFn upstream determinism. A1 + E14 anchored."
+sub_b_relaxed = "WalRecord wire format (12->13 fields) — RELAXED monotone append-only via V99-1. Future PQC sigs (Hybrid: signature_pqc=Some) append-only; rollback 0."
+
+# ============================================================
+# Formal verification result inventory
+# ============================================================

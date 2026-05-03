@@ -1,0 +1,29 @@
+[package]
+name = "arkhe-kernel"
+version = "0.13.0"
+edition = "2021"
+rust-version.workspace = true
+description = "Domain-neutral deterministic microkernel for virtual worlds. WAL-backed, bit-identical replay, invariant-lifetime shell brand, no async / no unsafe / no floating-point in canonical paths."
+keywords = ["kernel", "deterministic", "virtual-world", "event-sourcing", "replay"]
+categories = ["data-structures", "simulation", "emulators"]
+repository = "https://github.com/aceamro/ArkheKernel"
+homepage = "https://github.com/aceamro/ArkheKernel"
+documentation = "https://docs.rs/arkhe-kernel"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+authors = ["Arkhe Contributors"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+bitflags = { version = "2.6", features = ["serde"] }
+bytes = { version = "1.7", features = ["serde"] }
+blake3 = "1.5"
+postcard = { version = "1.0", features = ["use-std"] }
+arkhe-macros = { path = "../arkhe-macros", version = "0.13" }
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+# ML-DSA 65 (NIST FIPS 204, Dilithium-3) — PQC Hybrid mandate, default
+# dep (no feature gate). Hybrid signing path = Ed25519 + ML-DSA 65 dual-sign,
+# AND-mode verify. Software-only signer; HSM/KMS provider integration
+# deferred via PqcSigner / PqcVerifier trait abstraction.
+ml-dsa = "=0.1.0-rc.9"
+rand = { version = "0.9", default-features = false, features = ["std", "std_rng"] }
