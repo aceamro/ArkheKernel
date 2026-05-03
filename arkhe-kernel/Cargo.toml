@@ -27,3 +27,22 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 # deferred via PqcSigner / PqcVerifier trait abstraction.
 ml-dsa = "=0.1.0-rc.9"
 rand = { version = "0.9", default-features = false, features = ["std", "std_rng"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["plotters", "cargo_bench_support"] }
+
+[[bench]]
+name = "chain_hash"
+harness = false
+
+[[bench]]
+name = "signing"
+harness = false
+
+[[bench]]
+name = "codec"
+harness = false
+
+[[bench]]
+name = "dispatch"
+harness = false
