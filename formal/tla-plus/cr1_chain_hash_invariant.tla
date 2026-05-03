@@ -1,12 +1,11 @@
 ---- MODULE cr1_chain_hash_invariant ----
 (*
- * cr1_chain_hash_invariant — DIP-N5 sub-step E.3.
+ * cr1_chain_hash_invariant.
  *
  * CR-1 anchors E14 (Compute Determinism Closure) => A1 (bit-identical
  * replay). EXTENDs runtime_core with:
  *  (1) concrete refinement of `chain_tip` from opaque string to a
- *      bytes-sequence (theorist Finding 1 absorption at refinement,
- *      path (b) opaque-in-base + refine-here);
+ *      bytes-sequence (opaque-in-base + refine-here pattern);
  *  (2) `WalRecord` concrete record type for `wal` sequence (postcard
  *      field order sealed at L0 DO NOT TOUCH item 8);
  *  (3) `ChainHashDeterministic` invariant — E14 => A1 anchor;
@@ -20,8 +19,7 @@
  *
  * Apalache primary tooling per formal/tla-plus/README.md.
  * CI: `apalache-mc typecheck cr1_chain_hash_invariant.tla`.
- * Bounded MC (`apalache-mc check --inv=...`) lands when all 5 CR-* +
- * R4-I modules are present (E.7 close convention).
+ * Bounded MC (`apalache-mc check --inv=...`) is run on demand per INV.
  *)
 
 EXTENDS runtime_core
@@ -43,8 +41,7 @@ CONSTANTS
                            \* wal.rs` Layer A item 8 dual-layer
                            \* protection: (a) WalRecordBody field order
                            \* never escalates; (b) WalRecord wire format
-                           \* relaxed monotone append-only. theorist
-                           \* Minor Note 3 absorption at E.9 cycle close.
+                           \* relaxed monotone append-only.
 
 ASSUME
     /\ ComputeFns # {}
@@ -55,7 +52,7 @@ ASSUME
 (* --- Concrete refinement of base-module opaque types --- *)
 
 \* WalRecord — postcard-encoded canonical bytes contributing to the
-\* chain hash. The concrete v0.12 implementation lives in
+\* chain hash. The concrete implementation lives in
 \* `arkhe-kernel/src/persist/wal.rs`. Chain hash input subset =
 \* WalRecordBody 10-field order, INVARIANT across PQC envelope
 \* extensions (Layer A item 8 dual-layer: WalRecordBody never
@@ -68,8 +65,9 @@ WalRecord ==
       payload: Seq(0..255) ]
 
 \* ChainTipBytes — concrete bytes-sequence refinement of
-\* runtime_core's opaque `chain_tip \in STRING` (theorist Finding 1
-\* absorption at CR-1, path (b) opaque-in-base + refine-here).
+\* runtime_core's opaque `chain_tip \in STRING` (opaque-in-base +
+\* refine-here pattern: base module declares the abstract type, each
+\* refinement module concretises it).
 ChainTipBytes == Seq(0..255)
 
 ASSUME
@@ -108,7 +106,7 @@ ComputePurityHonored ==
     /\ ComputeFns # {}
 
 \* INV HostImportSealed — E14.L2-Allow rule 3 type-system anchor
-\* (M2.5 sealed-trait safeguard, DIP-N6 Phase 2). Strengthens
+\* (sealed-trait safeguard). Strengthens
 \* ComputePurityHonored at the *type-system layer*: the host-import
 \* surface is provided exclusively by types impl-ing the Rust trait
 \* `SealedHostImport: private_seal::Sealed` (where `private_seal::
@@ -126,7 +124,7 @@ ComputePurityHonored ==
 \* Operationally this INV holds vacuously at the TLA+ level (the
 \* CONSTANTS already fix the universe); its purpose is naming the
 \* Rust-side type-system anchor explicitly so axiom-test-cite.toml +
-\* Apalache typecheck capture the M2.5 strengthening event.
+\* Apalache typecheck capture the sealed-trait strengthening event.
 \*
 \* Anchored to:
 \*   - arkhe-forge-platform/src/wasm_runtime_common/mod.rs:394
@@ -178,8 +176,7 @@ SpecCR1 == InitCR1 /\ [][NextCR1]_vars
  *   runtime_core.tla         cr1 (refined)
  *   ---------------------    --------------------------------
  *   chain_tip \in STRING ->  chain_tip \in ChainTipBytes
- *                            (theorist Finding 1 absorption,
- *                             path b opaque-in-base + refine-here)
+ *                            (opaque-in-base + refine-here pattern)
  *   wal \in Seq(STRING)  ->  wal \in Seq(WalRecord)
  *                            (concrete record with seq + tick + payload)
  *
@@ -197,7 +194,7 @@ SpecCR1 == InitCR1 /\ [][NextCR1]_vars
  *                            an identical wal yield identical chain_tip.
  *   ComputePurityHonored   — host imports restricted to allow-list +
  *                            ComputeFns non-empty (E14.L1+L2 dual).
- *   HostImportSealed       — M2.5 sealed-trait type-system anchor of
+ *   HostImportSealed       — sealed-trait type-system anchor of
  *                            E14.L2-Allow rule 3: only same-crate
  *                            types impl SealedHostImport, host-import
  *                            universe monomorphic at compile time.
@@ -235,10 +232,10 @@ SpecCR1 == InitCR1 /\ [][NextCR1]_vars
  *
  * Together CR-1 + CR-4 close the chain-affecting compute axis
  * (Adversary A) and the chain-non-affecting observer axis
- * (Adversary B) at the v0.12 sealing cut.
+ * (Adversary B) at the sealing cut.
  *)
 
-(* --- SealedHostLinker_implies_4_set lemma (M2.5 strengthening) ---
+(* --- SealedHostLinker_implies_4_set lemma ---
  *
  * LEMMA SealedHostLinker_implies_4_set:
  *   The Rust-side sealed-trait safeguard (`SealedHostImport:
@@ -281,7 +278,7 @@ SpecCR1 == InitCR1 /\ [][NextCR1]_vars
  *   type-system layer; the TLA+ refinement faithfully models the
  *   strict Rust-side property.
  *
- * Witness anchors (1:1 with axiom-test-cite.toml E14_L2_Allow.impl_tests):
+ * Witness anchors (1:1 with axiom-test-cite.toml E14_L2_Allow impl_tests):
  *   - hook_capability_linker_satisfies_sealed_host_import      (mod.rs:898)
  *   - observer_capability_linker_satisfies_sealed_host_import  (mod.rs:910)
  *)

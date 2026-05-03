@@ -1,6 +1,6 @@
 ---- MODULE r4_implementation_refinement ----
 (*
- * r4_implementation_refinement — DIP-N5 sub-step E.6.
+ * r4_implementation_refinement.
  *
  * R4-I anchors E3 (Runtime → L0 strictly downward, L1 → L2 forbidden)
  * + E8 (Entry/Space parent DAG cycle-free + depth ≤ 64) + E9 (Activity
@@ -22,12 +22,11 @@
  *   - E9-MetaVerbDepthBounded (MC, hard cap 8)
  *
  * Scope: L0 + L1 + L2 cross-layer 3-tier hierarchy (E3 axiom
- * refinement, v0.12 sealing scope per `runtime-book/src/en/
- * architecture/02-layers.md` §2.1 + §2.2 — L1+L2 marked "this
- * DIP scope", L3+ marked "Out of scope"). L3 (Library/ECS) is
- * declared in `book/src/en/architecture/domain-spec.md` §"Layer
- * distinctions" but explicitly out-of-scope at v0.12 per
- * 02-layers.md §2.2 — application-domain layer with no v0.12
+ * refinement) per `runtime-book/src/en/architecture/02-layers.md`
+ * §2.1 + §2.2 — L1+L2 are in scope, L3+ explicitly out of scope.
+ * L3 (Library/ECS) is declared in
+ * `book/src/en/architecture/domain-spec.md` §"Layer distinctions"
+ * but is the application-domain layer and carries no kernel-level
  * invariant requirement.
  *
  * Distinction from R4-X (`book/src/en/appendix/decisions.md` R4-X):
@@ -40,9 +39,9 @@
  * not as the source axiom of `LayerImportStrictlyDownward`. R4-X
  * is Layer A DO NOT TOUCH item 6 (L0 sealed, runtime-book §16
  * references) — preserved verbatim, sealed at the L0 build-time
- * gate. The TLA+ refinement here captures the abstract E3
- * cross-layer invariant that the cargo-modules CI gate enforces
- * at build time.
+ * gate. The TLA+ refinement here captures the abstract E3 cross-
+ * layer invariant that the cargo-modules CI gate enforces at
+ * build time. (R4-X is a Layer A item ID, not a cycle ID.)
  *
  * Space coverage note: E8 spec body covers Entry/Space parent DAGs
  * symmetrically. The TLA+ catalog (README.md §11.3) records E8 as
@@ -51,12 +50,13 @@
  * structural form (parent_space: SpaceIds ∪ {NONE} + depth ≤ 64 +
  * acyclic via depth monotonicity). Modeling Entry only at the
  * abstraction level is sufficient — Space INV proofs are
- * structurally identical (theorist Minor Note 5 evaluation: tier
- * annotation applies symmetrically).
+ * structurally identical (the same tier annotation applies
+ * symmetrically).
  *
- * theorist Minor Note 1 absorption: NextR4 self-contained pattern.
- * theorist Minor Note 2 absorption: TypeOK_R4 explicit composition
- * via `TypeOK /\ ...` (E.4 + E.5 carry-forward confirmed).
+ * Convention notes for this module: NextR4 is self-contained (no
+ * shared abstract Next operator); TypeOK_R4 composes the base
+ * TypeOK explicitly via `TypeOK /\ ...`. Both conventions are
+ * shared with the other refinement modules.
  *
  * Anchored to:
  *   - runtime-book/src/en/architecture/11-axioms.md E3, E8, E9
@@ -107,9 +107,9 @@ CONSTANTS
     \* @type: Int;
     MaxImports,         \* Bounded MC ceiling: layer imports
     \* @type: Set($moduleId);
-    BoundaryModules,    \* {"hook_host", "observer_host"} — L1+ runtime sandbox boundary stratum (R2-S9)
+    BoundaryModules,    \* {"hook_host", "observer_host"} — L1+ runtime sandbox boundary stratum
     \* @type: Set($moduleId);
-    RuntimeModules      \* {"wasm_runtime_common"} — L1+ runtime sandbox runtime stratum (R2-S9)
+    RuntimeModules      \* {"wasm_runtime_common"} — L1+ runtime sandbox runtime stratum
 
 ASSUME
     /\ Layers = {"L0", "L1", "L2"}
@@ -177,8 +177,8 @@ vars_r4 == << chain_tip, wal, tick,
               runtime_bootstrap, signature_class_policy,
               layer_imports, r4_entries, r4_activities >>
 
-(* --- Type invariant (theorist Minor Note 2 explicit composition,
- *     E.4 + E.5 carry-forward confirmed at E.6) --- *)
+(* --- Type invariant (explicit composition with base TypeOK via
+ *     EXTENDS — convention shared with the other refinement modules) --- *)
 
 TypeOK_R4 ==
     /\ TypeOK                                    \* base, via EXTENDS
@@ -238,9 +238,9 @@ ActivitySelfLoopBlocked ==
 MetaVerbDepthBounded ==
     \A a \in r4_activities : a.meta_verb_depth <= MaxMetaVerbDepth
 
-\* INV E3-X: ImportDirectionMonotone (MC, M2.6 R4-X stratum extension,
-\* DIP-N6 Phase 2 M2-NEW-4a). Formal-method companion to the M2.6
-\* mechanical CI grep gate.
+\* INV E3-X: ImportDirectionMonotone (MC). R4-X stratum extension —
+\* formal-method companion to the mechanical CI grep gate that
+\* enforces the L1+ runtime sub-DAG direction.
 \*
 \* Scope: L1+ runtime sandbox sub-DAG (separate from R4-X's L0-internal
 \* `abi → state → runtime → persist` DAG documented in the R4-X sibling
@@ -254,8 +254,8 @@ MetaVerbDepthBounded ==
 \*
 \* Direction invariant: imports flow boundary → runtime exclusively;
 \* reverse edge (runtime → boundary) is forbidden. The CI lint job
-\* (`.github/workflows/ci.yml` line 145-163, M2.6 commit `a0d190a`)
-\* enforces this at the source-code level via `grep -E "use\s+
+\* (`.github/workflows/ci.yml` R4-X verify step) enforces this at the
+\* source-code level via `grep -E "use\s+
 \* (crate::)?(hook_host|observer_host)"` against
 \* `arkhe-forge-platform/src/wasm_runtime_common/`; this INV is the
 \* TLA+-abstract companion that names the property in the formal layer.
@@ -267,18 +267,13 @@ MetaVerbDepthBounded ==
 \* The dual-layer defense-in-depth anchors the property:
 \*   - TLA+ INV body: necessary precondition `BoundaryModules \cap
 \*     RuntimeModules = {}` — Apalache-checkable static set disjointness
-\*   - Source-level enforcement (sufficient condition): CI grep gate at
-\*     `.github/workflows/ci.yml` lines 145-163 (M2.6 commit `a0d190a`)
+\*   - Source-level enforcement (sufficient condition): CI grep gate
 \*     runs `grep -rE "use\s+(crate::)?(hook_host|observer_host)"` against
 \*     `arkhe-forge-platform/src/wasm_runtime_common/`; any reverse-edge
 \*     import (runtime → boundary) fails the lint job.
 \*
-\* R2-S9 (option ε refined α+δ): vacuous TRUE → necessary precondition
-\* INV body (α semantic gain) + design intent comment block carry
-\* (δ source-level enforcement reference enrichment).
-\*
 \* Anchored to:
-\*   - `.github/workflows/ci.yml` lint job R4-X verify step (M2.6, lines 145-163)
+\*   - `.github/workflows/ci.yml` lint job R4-X verify step
 \*   - `arkhe-forge-platform/src/wasm_runtime_common/mod.rs` (runtime
 \*     stratum, head-doc R4-X stratum classification)
 \*   - `arkhe-forge-platform/src/{hook_host,observer_host}/` (boundary
@@ -392,10 +387,10 @@ SpecR4 == InitR4 /\ [][NextR4]_vars_r4
  * Section 3 — Module-specific INVs
  *
  *   E3-LayerImportStrictlyDownward  (MC, E3 cross-layer 3-tier)
- *   E3-X-ImportDirectionMonotone    (MC, M2-NEW-4a R4-X stratum
- *                                    extension; L1+ runtime sub-DAG
+ *   E3-X-ImportDirectionMonotone    (MC, R4-X stratum extension;
+ *                                    L1+ runtime sub-DAG
  *                                    boundary→runtime single direction;
- *                                    formal companion to M2.6 CI grep
+ *                                    formal companion to the CI grep
  *                                    gate)
  *   E8-EntryParentDagDepthBounded   (MC, hard cap 64)
  *   E8-EntryParentDagAcyclic        (MC, depth monotonicity)
@@ -413,8 +408,8 @@ SpecR4 == InitR4 /\ [][NextR4]_vars_r4
  * R4-X is enforced by cargo-modules at L0 build time and operates
  * at the L0-internal abstraction level.
  *
- * R4-I (this module) refines E3 cross-layer 3-tier (v0.12 sealing
- * scope L0/L1/L2 per 02-layers.md §2.1+§2.2). The two operate at
+ * R4-I (this module) refines E3 cross-layer 3-tier (sealing scope
+ * L0/L1/L2 per 02-layers.md §2.1+§2.2). The two operate at
  * different abstraction levels:
  *   - R4-X: WITHIN the L0 crate — module-graph stratum order
  *           (abi/state/runtime/persist).
@@ -430,19 +425,18 @@ SpecR4 == InitR4 /\ [][NextR4]_vars_r4
  * R4-X is Layer A DO NOT TOUCH item 6 per
  * `runtime-book/src/en/architecture/16-references.md` ordering:
  * (1) DOMAIN_CTX / (2) InvariantLifetime / (3) Principal+KernelEvent
- * +StepStage derives / (4) A11 MC tag / (5) ROADMAP v0.99+ Deferred
+ * +StepStage derives / (4) A11 MC tag / (5) ROADMAP Deferred section
  * / (6) R4-X DAG / (7) EventMask bit allocation / (8) WalRecord
  * postcard field order. Layer A sealing means the cargo-modules CI
- * gate config is permanent across cycles; only escalation by
- * explicit user consent can relax it. (cryptographer E.6 secondary
- * verify caught earlier item-5 mis-cite — fixed before commit.)
+ * gate config is permanent; only escalation by explicit user consent
+ * can relax it.
  *
  * Symmetric counterparts:
  *   - CR-1 (Adversary A, chain-affecting compute determinism)
  *   - CR-3 (PQC downgrade, chain-anchored policy)
  *   - CR-4 (Adversary B, chain-non-affecting observer mutation)
  *
- * R4-I + CR-1 + CR-3 + CR-4 close the v0.12 sealing chain at the
+ * R4-I + CR-1 + CR-3 + CR-4 close the sealing chain at the
  * formal-method level: layering integrity + compute determinism +
  * policy anchoring + observer confinement.
  *)

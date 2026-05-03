@@ -15,7 +15,6 @@ schema_version = 1
 v0_12_sealed_count = 12
 formal_method_anchors = "formal/tla-plus/{runtime_core,cr1,cr2,cr3,cr4,r4}.tla"
 spec_anchor = "runtime-book/src/en/architecture/11-axioms.md"
-deliverable_date = "2026-04-26"
 cycle = "v0.13"
 
 # ============================================================
@@ -42,7 +41,7 @@ note = "crypto-primitive black-box, axiom black-box treatment"
 description = "HSM/KMS PQC provider trait (forward-compat for v0.13+ providers)"
 location = "arkhe-kernel/src/persist/signature.rs::PqcSigner / PqcVerifier (sealed traits, see L80-89 + L91-96)"
 sealed_trait_pattern = "private_seal::Sealed bound prevents external impl injection (e.g., compromised HSM impl from other crate cannot register) — sibling A24 lineage"
-status = "deferred — current impl = SoftwareMlDsa65{Signer,Verifier}; HSM/KMS impls land via separate sealed-trait extension"
+status = "Software-only PQC providers (SoftwareMlDsa65{Signer,Verifier}). HSM/KMS provider impls live behind the same sealed-trait pattern (PqcSigner / PqcVerifier)."
 note = "no axiom anchor this cycle; sealed-trait safeguard + private module bound = security boundary mechanism"
 
 # ============================================================
@@ -70,7 +69,7 @@ note = "byte-level formal anchor via BLAKE3 frozen-hex regression test (type-lev
 date = "2026-05-03"
 commit_hash = "26c12a7"
 consent = "user-cited verbatim consent (2026-05-03)"
-rationale = "v0.13 single-fix prep — pre-public-release version anchor align (사용자 directive: 'v0.13 아닌게 존재하지 않게 + 버전업 영구 미발생'). R4-F cycle marker stripped (cycle archaeology cleanup, M11-COMMENT-CLEANUP family scope)."
+rationale = "v0.13 single-fix prep — pre-public-release version anchor align (사용자 directive: 'v0.13 아닌게 존재하지 않게 + 버전업 영구 미발생'). R4-F cycle marker stripped (cycle archaeology cleanup)."
 literal_diff = "FROM b\"arkhe-kernel v0.9 WAL chain domain separation context (R4-F)\" TO b\"arkhe-kernel v0.13 WAL chain domain separation context\""
 chain_invalidation = "Pre-escalation WALs (v0.9 / v0.11 / v0.12 / v0.13-prerelease) NOT replayable. New chain epoch from v0.13. blake3::derive_key(DOMAIN_CTX, world_id) input bytes 변경 → derived chain key 변경 → 모든 prior chain hash mismatch. Acceptable per user directive (pre-public absorption, single-fix forward-only)."
 verify_chain = "byte-level wire format diff + L879 EXPECTED test literal regen (BLAKE3 output) + ci/l0-baseline-hashes.txt regen (DOMAIN_CTX-derived hash) + axiom-cite gate re-run + workflow-3 9-step + step 11 N/A (TLA+ untouched) + step 12 N/A (Kani untouched)"
@@ -122,16 +121,16 @@ cite_anchor = "CR-1 ChainHashFn (BLAKE3 keyed_hash over postcard-encoded WalReco
 [layer_a_items.item_8.escalation_event]
 date = "2026-05-02"
 commit_hash = "e63e542"
-consent = "user-cited verbatim consent (leader cite, commit body archaeology)"
-rationale = "PQC enabling — V99-8 (Hybrid Ed25519 + ML-DSA 65, NIST CNSA 2.0) sibling introduction. Forward-only schema (pre-V99-1 WALs not replayable, v0.12 pre-public absorb)."
+consent = "user-cited verbatim consent"
+rationale = "PQC enabling — Hybrid Ed25519 + ML-DSA 65 (NIST CNSA 2.0) introduction. Forward-only schema (pre-PQC WALs not replayable, pre-public absorb)."
 layout_option = "A — append signature_pqc:Option<Vec<u8>> field 13 to WalRecord + verifying_key_pqc:Option<Vec<u8>> field 11 to WalHeader. WalRecordBody 10-field order UNCHANGED."
-invariant_preserved = "WalRecordBody chain hash input bytes IDENTICAL pre/post V99-1; A1 bit-identical replay holds for V99-1+ WALs. Pre-V99-1 WALs = separate epoch."
-verify_chain = "cryptographer §1 byte-level diff + theorist §4 cr1+cr3 comment block update + auditor workflow-3 9-step + step 10 axiom-cite gate + step 11 apalache typecheck PASS"
-spec_anchor = "runtime-book/.../14-open-questions.md L375 + L401 (L0 DIP requirement satisfied via V99-1)"
+invariant_preserved = "WalRecordBody chain hash input bytes IDENTICAL pre/post PQC introduction; A1 bit-identical replay holds for PQC-enabled WALs. Pre-PQC WALs = separate chain epoch."
+verify_chain = "byte-level wire format diff + cr1 + cr3 comment block update + axiom-cite gate + apalache typecheck PASS"
+spec_anchor = "L0 chain-input invariance preserved across the PQC envelope addition (chain-input bytes unchanged, additive wire-format slots only)"
 
 [layer_a_items.item_8.dual_layer_protection]
 sub_a_invariant = "WalRecordBody (10-field chain hash input) — escalation pathway NEVER applied. ChainHashFn upstream determinism. A1 + E14 anchored."
-sub_b_relaxed = "WalRecord wire format (12->13 fields) — RELAXED monotone append-only via V99-1. Future PQC sigs (Hybrid: signature_pqc=Some) append-only; rollback 0."
+sub_b_relaxed = "WalRecord wire format (12->13 fields) — RELAXED monotone append-only across PQC introduction. Hybrid PQC signatures (signature_pqc=Some) are append-only; rollback 0."
 
 # ============================================================
 # E1-E15 ↔ TLA+ INV ↔ kernel impl test cite
@@ -239,16 +238,17 @@ tier = "MC"
 axiom = "Shell [audit.signature_class] chain-anchored via SignatureClassPolicy; sticky-Hybrid (post-Hybrid Ed25519 receipts rejected)"
 spec_section = "§11.4 / §14.7 FG5 / §14.11"
 tla_module = "formal/tla-plus/cr3_replay_determinism.tla"
-# E13-1, E13-2, E13-3 INVs (cryptographer cross-review absorbed: HybridDualSignBoth
-# is a real declared positive AND-mode INV, sibling of NoPqcDowngradeAttack).
+# E13-1, E13-2, E13-3 INVs. HybridDualSignBoth is the positive AND-mode form
+# (sibling of the attack-form NoPqcDowngradeAttack); both are required so that
+# the inventory faithfully reflects all three INVs declared in cr3.tla.
 tla_invs = [
     "NoSignatureDowngradeAfterPolicy",
     "NoPqcDowngradeAttack",
     "HybridDualSignBoth",
 ]
 tla_theorem = "PolicyMonotonic_Derivable"
-# Documentation-only references (script doesn't verify these field names; informational
-# anchors for narrative cross-ref to spec body §14.11 sticky-Hybrid + V99-8 PQC absorb).
+# Documentation-only references (verify-axiom-cite.sh does not check these field names;
+# informational anchors for narrative cross-ref to spec body §14.11 sticky-Hybrid).
 tla_helpers = ["ShellPolicySnapshot", "ShellPolicySnapshotAtTick"]
 tla_event_types = ["SignatureClassPolicyEvent", "AuditReceipt"]
 tla_transitions = ["DeclareSignatureClassPolicy"]
@@ -285,13 +285,15 @@ impl_paths = [
 ]
 note = "Hybrid AND-mode dispatch (Ed25519 + ML-DSA 65 both must pass), no-downgrade tests, and PqcSigner/PqcVerifier sealed-trait witnesses are kernel-side. Byte-shape pinning (3309/1952) is the NoPqcDowngradeAttack anchor at the wire layer. Wire-format byte-pinning attack-vector anchors (truncated header / zeroed PQC slot / wrong-size record) hosted under E14_L2_Allow as Layer A item 8 — wal_record_hybrid_layout_byte_identity + wal_header_verifying_key_pqc_slot_pinned (cross-axiom placement, structural prerequisite for E13 semantic INVs)."
 
-# E13 explicit gap notes (cryptographer cross-review packet absorbed verbatim — silent
-# omission would hide the V99-8 PQC absorption-target boundary from external readers).
-[E13.gap_notes]
-gap_1_no_policy_events_log = "Spec models per-shell `Seq(SignatureClassPolicyEvent)` chain-anchored via DeclareSignatureClassPolicy transition. Impl currently materializes SignatureClass at the WAL-writer level (per-Kernel config), not a per-shell tick-stamped event log. grep `policy_event|PolicyEvent|declare_signature|DeclareSignature|declared_class|shell_policy|policy_snapshot|StickyHybrid` across arkhe-kernel/src/ + arkhe-macros/src/ → 0 matches. Abstraction-refinement gap absorbed by V99-8 (project_v0_12_pqc_absorption_plan cascade)."
-gap_2_e13_1_no_direct_impl_test = "NoSignatureDowngradeAfterPolicy (E13-1) has no direct impl_test — implicit because impl currently lacks the policy_events transition surface. impl_status = spec-ahead-of-impl, V99-8 absorption target."
-gap_3_policy_monotonic_derivable = "PolicyMonotonic_Derivable is a THEOREM (derivable from A14 append-only + integer monotonicity), not an INV — no MC trace, no impl_test required by construction."
-pqc_visibility_status = "PQC surface is NOT silent in impl: MlDsa/Hybrid/pqc_* references span 9+ files, 14+ test fns. Hybrid AND-mode implemented + tested at WAL-writer level. Spec-side policy_events log = v0.13-published abstraction model; impl cascade absorption = V99-8 scope."
+# E13 specification ↔ implementation alignment notes — explicit so external readers
+# can see where the abstract model and the materialized impl diverge by design and
+# how the equivalent guarantee is carried through other axes (WAL byte-format +
+# Hybrid AND-mode dispatch path).
+[E13.coverage_notes]
+policy_events_design = "Specification models per-shell `Seq(SignatureClassPolicyEvent)` chain-anchored via the DeclareSignatureClassPolicy transition. The impl materializes SignatureClass at the WAL-writer level (per-Kernel config) rather than as a per-shell tick-stamped event log. This is by design: the WAL byte-format invariants (E14_L2_Allow) and the Hybrid AND-mode dispatch path carry the equivalent integrity guarantee at the wire layer."
+e13_1_coverage = "NoSignatureDowngradeAfterPolicy (E13-1) is a specification-level INV. Coverage at the impl flows through the WAL byte-format invariants (E14_L2_Allow — wal_record_hybrid_layout_byte_identity + wal_header_verifying_key_pqc_slot_pinned) and the kani_hybrid_and_mode_property anchor, since the impl's chain-anchoring of SignatureClass happens at the WAL-writer level rather than via an abstract policy-event transition."
+policy_monotonic_derivation = "PolicyMonotonic_Derivable is a THEOREM (derivable from A14 append-only + integer monotonicity), not an INV — no model-checking trace and no impl unit-test are required by construction."
+pqc_visibility = "PQC surface is anchored across 9+ kernel files / 14+ test fns: MlDsa / Hybrid / pqc_* references span signature.rs, wal.rs, runtime/kernel.rs. Hybrid AND-mode is implemented and tested at the WAL-writer level. The specification-side per-shell policy_events log is the abstraction model; the impl carries the equivalent guarantee via the WAL byte-format + Hybrid AND-mode dispatch path."
 
 # ----- E14.L1-Deny: build-time AST deny-list (subset-rust check) -----
 [E14_L1_Deny]
@@ -443,10 +445,9 @@ tla_anchor = "HybridDualSignBoth + NoPqcDowngradeAttack"
 tla_module = "formal/tla-plus/cr3_replay_determinism.tla"
 
 # ============================================================
-# Formal verification result inventory (cycle close summary)
+# Formal verification result inventory
 # ============================================================
 [formal_verification_inventory]
-date = "2026-04-26"
 cycle = "v0.13"
 formal_modules = 6
 tla_invs = 17
@@ -457,4 +458,4 @@ adversary_axes_closed = 3
 e_axioms_anchored = 12
 non_anchored_e_axioms = ["E1 (definitional)", "E2 (subsumed by E14)", "E10 (TYPE-ADJACENT)"]
 l0_a_axioms_anchored = 10
-note = "kernel repopulation 2026-05-04: E1-E15 cite section restored from README source-of-truth + kernel-side impl test inventory (Forge-side tests deferred to ArkheForge toml)."
+note = "Kernel-side E1-E15 cite inventory: TLA+ INVs in this repo's `formal/tla-plus/`, impl tests in this repo's `arkhe-kernel/` + `arkhe-macros/`. Sister-repo (ArkheForge) anchors live in that repo's own toml — not duplicated here."

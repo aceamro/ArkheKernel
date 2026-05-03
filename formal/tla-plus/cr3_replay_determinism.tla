@@ -1,6 +1,6 @@
 ---- MODULE cr3_replay_determinism ----
 (*
- * cr3_replay_determinism — DIP-N5 sub-step E.5.
+ * cr3_replay_determinism.
  *
  * CR-3 anchors E11 (cascade re-submit deterministic tick) + E12
  * (RuntimeBootstrap chain-anchored) + E13 (SignatureClassPolicy
@@ -9,9 +9,10 @@
  *  (1) RuntimeBootstrapEvent record refinement;
  *  (2) SignatureClassPolicyEvent + AuditReceipt + CascadeOp
  *      record types;
- *  (3) ShellPolicySnapshot sticky-Hybrid helper (option (ii)
- *      adopted per cryptographer + theorist convergent at v0.4);
- *  (4) 5 module-specific INVs + 1 derivable theorem;
+ *  (3) Sticky-Hybrid policy snapshot helpers (sticky-by-construction
+ *      under WAL append-only, so PolicyMonotonic is a derivable
+ *      theorem rather than a separate state-level INV);
+ *  (4) Module-specific INVs + 1 derivable theorem;
  *  (5) Concrete state machine: DeclareSignatureClassPolicy /
  *      IssueAuditReceipt / ScheduleCascadeOp transitions.
  *
@@ -21,39 +22,31 @@
  *   - E12-ManifestDriftReplayRejected (MC, fail-secure)
  *   - E13-NoSignatureDowngradeAfterPolicy (MC, sticky-derived)
  *   - E13-NoPqcDowngradeAttack (MC, explicit attack-form)
+ *   - E13-HybridDualSignBoth (MC, AND-mode positive form)
  *   - E13-PolicyMonotonic_Derivable (theorem from A14)
  *
- * Spec body sticky semantic verification:
+ * Spec body sticky semantic anchor:
  * `runtime-book/src/en/architecture/11-axioms.md` E13 phrasing
  * "after the tick at which a given shell declared Hybrid ...
  *  shell-per-tick sticky snapshot of SignatureClassPolicy ...
  *  monotone: once a shell declares Hybrid at tick T, all receipts
  *  at ticks >= T must be Hybrid-signed; the snapshot never
- *  reverts" — this latching semantic supports option (ii) at the
- * spec level. Option (ii) adopted; option (i) PolicyMonotonic
- * separate INV fallback NOT triggered. Wording precision N6.3
- * absorption (cryptographer E.5 LEAD verify origin).
- *
- * Cryptographer LEAD verify scope per cycle plan v0.4: Adversary
- * "PQC downgrade" residual closure proof primary.
- *
- * theorist Minor Note 1 absorption: NextCR3 self-contained pattern.
- * theorist Minor Note 2 absorption: TypeOK_CR3 explicit composition
- * via `TypeOK /\ ...`.
- * theorist M1 absorption (E.5 cross-review): tick-filtered
- * ShellPolicySnapshotAtTick helper added; NoSignatureDowngrade-
- * AfterPolicy uses tick filter to capture E13 "after the tick at
- * which a given shell declared Hybrid" semantic correctly.
+ *  reverts". The latching semantic is captured by tick-filtered
+ *  ShellPolicySnapshotAtTick: receipts are evaluated against the
+ *  snapshot of policy events with effective_tick <= issued_tick,
+ *  so a pre-Hybrid Ed25519 receipt is not retroactively invalidated
+ *  by a later Hybrid declaration.
  *
  * PQC envelope dependency: WalRecord wire format provides
  * signature_pqc (field 13) and verifying_key_pqc (field 11) slots.
  * E13 NoPqcDowngradeAttack is type-system anchored at the wire
  * format level by these slots — any post-Hybrid receipt must
  * populate signature_pqc=Some, any Hybrid policy event implicitly
- * references the envelope slot. A future refinement cycle
- * activates the Hybrid signature class enum variant + dual-sign
- * verify path; the natural INV growth point is chosen between cr1
- * (chain hash domain) and cr3 (signature class policy) at that time.
+ * references the envelope slot. The Hybrid signature class enum
+ * variant and dual-sign verify path land in the impl side under
+ * persist/{signature,wal}.rs; the cr3 INV growth point sits in
+ * this module (signature class policy axis), with cr1 carrying
+ * the chain-hash determinism axis.
  *
  * Anchored to:
  *   - runtime-book/src/en/architecture/11-axioms.md E11-E13
@@ -151,7 +144,7 @@ vars_cr3 == << chain_tip, wal, tick,
                bootstrap_event, policy_events,
                audit_receipts, cascade_ops >>
 
-(* --- Type invariant (theorist Minor Note 2 explicit composition) --- *)
+(* --- Type invariant (explicit composition over base TypeOK) --- *)
 
 TypeOK_CR3 ==
     /\ TypeOK                                    \* base, via EXTENDS
@@ -163,7 +156,7 @@ TypeOK_CR3 ==
     /\ Len(audit_receipts) <= MaxAuditReceipts
     /\ Len(cascade_ops) <= MaxCascadeOps
 
-(* --- Sticky-Hybrid snapshot helper (option (ii) adopted) ---
+(* --- Sticky-Hybrid snapshot helper ---
  *
  * ShellPolicySnapshot returns "Hybrid" if any prior policy event
  * for the shell declared "Hybrid"; else "Ed25519". This captures
@@ -174,10 +167,10 @@ TypeOK_CR3 ==
  * Mathematical property: sticky under WAL append-only (A14).
  * Once a Hybrid policy event lands, it persists in subsequent
  * snapshots — the existential is monotone under set extension.
- *
- * cryptographer + theorist convergent at v0.4: option (ii) sticky
- * theorem path. Option (i) PolicyMonotonic separate INV fallback
- * NOT triggered (spec body wording supports option ii).
+ * Because the property is derivable from A14 + the existential
+ * structure, PolicyMonotonic is carried as a derivable theorem
+ * (see `PolicyMonotonic_Derivable` below) rather than as a
+ * separate state-level invariant.
  *)
 \* @type: (Seq($policyEvent), $shell) => $signatureClass;
 ShellPolicySnapshot(events, shell_id) ==
@@ -193,13 +186,12 @@ ShellPolicySnapshot(events, shell_id) ==
  * of tick `t` — filters policy events to those with effective_tick
  * <= t. Used by NoSignatureDowngradeAfterPolicy to capture the
  * E13 "after the tick at which a given shell declared Hybrid"
- * semantic. theorist M1 absorption at E.5 cross-review:
- * unfiltered ShellPolicySnapshot caused retroactive invalidation
- * of pre-Hybrid Ed25519 receipts (counterexample: receipt at
- * tick 0 + Hybrid policy at tick 1 violates spec body's "after"
- * temporal ordering). Tick-filtered variant aligns the INV with
- * the IssueAuditReceipt precondition (issue-time check at the
- * receipt's own tick).
+ * semantic. The unfiltered ShellPolicySnapshot would retroactively
+ * invalidate pre-Hybrid Ed25519 receipts (a receipt at tick 0
+ * combined with a Hybrid policy at tick 1 would violate the spec
+ * body's "after" temporal ordering); the tick-filtered variant
+ * aligns the INV with the IssueAuditReceipt precondition (issue-
+ * time check at the receipt's own tick).
  *)
 \* @type: (Seq($policyEvent), $shell, Int) => $signatureClass;
 ShellPolicySnapshotAtTick(events, shell_id, t) ==
@@ -239,9 +231,8 @@ CascadeOpDeterministicTickPlacement ==
 \* effective_tick <= issued_tick) must themselves be "Hybrid"-signed.
 \* Uses ShellPolicySnapshotAtTick (tick-filtered) to capture E13
 \* "after the tick at which a given shell declared Hybrid" semantic
-\* per spec body. theorist M1 absorption at E.5 cross-review.
-\* Contrapositive equivalent of NoPqcDowngradeAttack — both INVs
-\* preserved for positive + negative form documentation.
+\* per spec body. Contrapositive equivalent of NoPqcDowngradeAttack
+\* — both INVs preserved for positive + negative form documentation.
 NoSignatureDowngradeAfterPolicy ==
     \A i \in DOMAIN audit_receipts :
         LET r        == audit_receipts[i]
@@ -250,10 +241,9 @@ NoSignatureDowngradeAfterPolicy ==
                                                   r.issued_tick)
         IN snapshot = "Hybrid" => r.signature_class = "Hybrid"
 
-\* INV E13-2: NoPqcDowngradeAttack (explicit attack-form, cryptographer
-\* LEAD primary verify scope). No receipt is "Ed25519" while a
-\* prior "Hybrid" policy event exists for the same shell at or
-\* before the receipt's issued tick.
+\* INV E13-2: NoPqcDowngradeAttack (explicit attack-form). No
+\* receipt is "Ed25519" while a prior "Hybrid" policy event exists
+\* for the same shell at or before the receipt's issued tick.
 NoPqcDowngradeAttack ==
     ~ \E i \in DOMAIN audit_receipts, j \in DOMAIN policy_events :
         /\ policy_events[j].shell = audit_receipts[i].shell
@@ -282,8 +272,7 @@ HybridDualSignBoth ==
 
 (* --- Theorem: PolicyMonotonic_Derivable (sticky-Hybrid from A14) ---
  *
- * THEOREM PolicyMonotonic_Derivable (tick-monotonicity form,
- * theorist M1 absorption restated form per Option β):
+ * THEOREM PolicyMonotonic_Derivable (tick-monotonicity form):
  *   For any shell s, policy_events sequence p, and times t1 <= t2,
  *   if ShellPolicySnapshotAtTick(p, s, t1) = "Hybrid", then
  *   ShellPolicySnapshotAtTick(p, s, t2) = "Hybrid".
@@ -303,16 +292,13 @@ HybridDualSignBoth ==
  * filter) is monotone under this prefix extension — any prior
  * "Hybrid" witness persists.
  *
- * This theorem replaces an explicit PolicyMonotonic state-level
- * invariant per cryptographer + theorist option (ii) sticky-Hybrid
- * convergent at cycle plan v0.4. The theorem is a derivable
- * consequence of integer monotonicity + the tick-filtered helper
- * definition; the corollary additionally requires A14 append-only.
- *
- * Option (i) fallback (PolicyMonotonic separate INV + DIP-N6 spec
- * body queue) was NOT triggered: spec body sticky/latching
- * semantic verified at E.5 entry per `runtime-book/src/en/
- * architecture/11-axioms.md` E13 + §14.11 wording.
+ * This theorem stands in for an explicit PolicyMonotonic state-
+ * level invariant: it is a derivable consequence of integer
+ * monotonicity + the tick-filtered helper definition, and the
+ * corollary additionally requires A14 append-only. The spec body
+ * sticky/latching wording at `runtime-book/src/en/architecture/
+ * 11-axioms.md` E13 + §14.11 supplies the source-of-truth
+ * narrative anchor.
  *)
 
 (* --- Concrete state machine refinement --- *)
@@ -446,8 +432,8 @@ SpecCR3 == InitCR3 /\ [][NextCR3]_vars_cr3
  *   E12-ManifestDriftReplayRejected        (MC, fail-secure)
  *   E11-CascadeOpDeterministicTickPlacement (MC)
  *   E13-NoSignatureDowngradeAfterPolicy    (MC, sticky-derived)
- *   E13-NoPqcDowngradeAttack               (MC, attack-form,
- *                                          cryptographer LEAD)
+ *   E13-NoPqcDowngradeAttack               (MC, attack-form)
+ *   E13-HybridDualSignBoth                 (MC, AND-mode positive form)
  *   E13-PolicyMonotonic_Derivable          (theorem from A14)
  *)
 
@@ -458,7 +444,7 @@ SpecCR3 == InitCR3 /\ [][NextCR3]_vars_cr3
  *     anchor → adversary tampers a post-Hybrid receipt to claim
  *     Ed25519 signing → bypasses Hybrid quantum-security.
  *
- * E13 closure under sticky semantic option (ii):
+ * E13 closure under the sticky-Hybrid semantic:
  *   - SignatureClassPolicy events chain-anchored in WAL via A14
  *     append-only.
  *   - Verifier reconstructs ShellPolicySnapshot from WAL prefix.
@@ -467,9 +453,11 @@ SpecCR3 == InitCR3 /\ [][NextCR3]_vars_cr3
  *     is a theorem from A14 — no separate state-level INV
  *     required).
  *   - Ed25519 receipt after a "Hybrid" declaration is rejected
- *     (NoSignatureDowngradeAfterPolicy + NoPqcDowngradeAttack).
+ *     (NoSignatureDowngradeAfterPolicy + NoPqcDowngradeAttack);
+ *     a Hybrid receipt's both Ed25519 and ML-DSA legs must verify
+ *     (HybridDualSignBoth, AND-mode).
  *
- * Residual surface (cryptographer LEAD primary verify):
+ * Residual surface:
  *   (i)  WAL forge before chain-anchored detection (A14 append-
  *        only invariant breach, out-of-scope per L0 sealing
  *        guarantees);
@@ -481,8 +469,8 @@ SpecCR3 == InitCR3 /\ [][NextCR3]_vars_cr3
  * Symmetric counterpart: CR-1 Adversary A residual reduction
  * (E14 compute determinism). Together CR-1 + CR-3 close the
  * chain-affecting compute axis (Adversary A) + chain-anchored
- * policy axis (PQC downgrade) at v0.12. CR-4 closes the
- * chain-non-affecting observer axis (Adversary B, E15).
+ * policy axis (PQC downgrade). CR-4 closes the chain-non-
+ * affecting observer axis (Adversary B, E15).
  *)
 
 ====

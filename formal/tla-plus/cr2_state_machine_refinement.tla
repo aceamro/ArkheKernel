@@ -1,6 +1,6 @@
 ---- MODULE cr2_state_machine_refinement ----
 (*
- * cr2_state_machine_refinement — DIP-N5 sub-step E.4.
+ * cr2_state_machine_refinement.
  *
  * CR-2 anchors E5 (Actor immutability) + E6 (Authenticated typestate)
  * + E7 (dual-tier shell brand) + E4 (UserId uniqueness). EXTENDs
@@ -34,7 +34,7 @@
  *   - runtime-book/src/en/architecture/11-axioms.md E4-E7
  *
  * Apalache primary tooling. CI: `apalache-mc typecheck` per .tla.
- * Bounded MC `apalache-mc check --inv=...` lands at E.7 close.
+ * Bounded MC `apalache-mc check --inv=...` is run on demand per module.
  *)
 
 EXTENDS runtime_core
@@ -81,8 +81,8 @@ vars_cr2 == << chain_tip, wal, tick,
                runtime_bootstrap, signature_class_policy,
                activities, user_bindings_state, pending_actors >>
 
-(* --- Type invariant (theorist Minor Note 2 absorption — explicit
- *     composition with base TypeOK via EXTENDS) --- *)
+(* --- Type invariant (explicit composition with base TypeOK via
+ *     EXTENDS — convention shared with the other refinement modules) --- *)
 
 TypeOK_CR2 ==
     /\ TypeOK                                       \* base, via EXTENDS
