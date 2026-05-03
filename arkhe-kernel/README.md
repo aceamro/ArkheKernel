@@ -188,6 +188,32 @@ not for first-time users.
   channel, and fuel-budget surfaces from drive-by edits. See
   [`developteamset.md`](developteamset.md).
 
+## Performance
+
+ArkheKernel ships three signing modes (`SignatureClass::{None, Ed25519,
+Hybrid}`); throughput depends on the choice:
+
+| Signing mode      | Throughput        | Use case                                |
+| :---              |              ---: | :---                                    |
+| `None`            | ~1M actions/sec   | Dev / test, deterministic replay only   |
+| `Ed25519` (Tier 2)| ~35k actions/sec  | Production audit log, classical sigs    |
+| `Hybrid` PQC      | ~1k actions/sec   | Long-term post-quantum audit chain      |
+
+Numbers measured on Apple M3 Max, single-thread, via criterion (95%
+confidence intervals, outlier detection, warm-up). Reproduce locally:
+
+```bash
+cargo bench -p arkhe-kernel
+```
+
+Per-primitive measurements live in [`arkhe-kernel/benches/`](arkhe-kernel/benches/)
+(`chain_hash`, `signing`, `codec`, `dispatch`). HTML reports with full
+distribution graphs land in `target/criterion/` after `cargo bench`.
+
+These are honest performance disclosures, not audited industry
+benchmarks — the bench code is the spec, and external readers
+reproduce on their own hardware to verify.
+
 ## Stability
 
 v0.13 — single fixed pre-public version. No version churn before
