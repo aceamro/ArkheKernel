@@ -218,9 +218,7 @@ reproduce on their own hardware to verify.
 
 v0.13 — single fixed pre-public version. No version churn before
 external publish; subsequent corrections land on the same v0.13 line.
-Version 1.0 is intentionally never reached. See
-[`docs/spec-drift-candidates.md`](docs/spec-drift-candidates.md) for
-the post-publish reconciliation backlog.
+Version 1.0 is intentionally never reached.
 
 ## Documentation
 
@@ -228,7 +226,6 @@ the post-publish reconciliation backlog.
   local preview)
 - API reference: [docs.rs/arkhe-kernel](https://docs.rs/arkhe-kernel)
 - Operator runbook: [`docs/runbook/`](docs/runbook/)
-- Implementation plan: [`docs/implementation-plan.md`](docs/implementation-plan.md)
 - Release keys + signing: [`docs/release-keys.md`](docs/release-keys.md)
 - Build reproducibility: [`docs/build-reproducibility.md`](docs/build-reproducibility.md)
 

@@ -184,7 +184,7 @@ When a release tag is pushed, the `.github/workflows/ci.yml` `release-sign` job 
 | Type | Path |
 |---|---|
 | Release binaries | `target/release/dice-domain` |
-| Crate tarballs | `cargo package --no-verify` output of the 7 publish-true crates (`target/package/<crate>-0.11.0.crate`) |
+| Crate tarballs | `cargo package --no-verify` output of the 7 publish-true crates (`target/package/<crate>-0.13.0.crate`) |
 
 Crate list: `arkhe-kernel`, `arkhe-macros`, `arkhe-forge-core`, `arkhe-forge-macros`, `arkhe-forge-platform`, `arkhe-forge`, `arkhe-runtime-testkit`. `arkhe-trait-default-check` and `examples/dice` stay `publish = false` and are not signed.
 

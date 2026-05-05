@@ -19,10 +19,7 @@ Layer independence is one-way: L0 ← Runtime ← Shell. Shell repositories
 
 | Document | Purpose |
 |----------|---------|
-| [`implementation-plan.md`](implementation-plan.md) | Runtime implementation plan — 19 items + milestones + entry-checkpoint conditions. |
-| [`alpha-release-schedule.md`](alpha-release-schedule.md) | Alpha-release blocker docs (5 Runtime + 1 BBS) and external-legal review buffer. |
 | [`msrv-policy.md`](msrv-policy.md) | MSRV 1.80+ pin + future bump conditions. |
-| [`spec-drift-candidates.md`](spec-drift-candidates.md) | Implementation-ahead drifts queued for the next spec patch round. |
 | [`sealing-pattern-lineage.md`](sealing-pattern-lineage.md) | Sealed-trait lineage — A24 ↔ SealedCapToken ↔ SealedHostImport, the architectural anchor of the type-system sealing chain. |
 | [`axiom-test-cite-guide.md`](axiom-test-cite-guide.md) | Author + operator guide for the axiom-cite triple-link (TLA+ INV ↔ Rust impl test ↔ inventory). |
 | [`pqc-software-only.md`](pqc-software-only.md) | PQC software-only signer caveat — Tier 0/1/2 deployment matrix, key handling guide. |
@@ -41,11 +38,6 @@ Layer independence is one-way: L0 ← Runtime ← Shell. Shell repositories
 |----------|---------|
 | [`runbook/tier-0-limitations.md`](runbook/tier-0-limitations.md) | Tier-0 (software-KEK dev) deployment boundary + limits. |
 | [`runbook/l2-single-active-operations.md`](runbook/l2-single-active-operations.md) | Active-passive L2 single-active model + SLO suspension protocol. |
-
-Additional alpha-blocker runbooks (`crypto-erasure.md`, `hsm-degraded-mode.md`,
-`alpha-to-beta-promote.md`) and the legal-basis note (`Legal/gdpr-crypto-erasure.md`)
-land during the matching milestones — see
-[`alpha-release-schedule.md`](alpha-release-schedule.md).
 
 ---
 
