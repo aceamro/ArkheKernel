@@ -110,7 +110,7 @@ let tip2 = k2.wal_chain_tip().unwrap();
 assert_eq!(tip1, tip2);  // bit-identical chain (A1)
 ```
 
-The `domains/dice/` demo exercises the same pattern end to end, including replay:
+The `examples/dice/` demo exercises the same pattern end to end, including replay:
 
 ```bash
 cargo run -p dice-domain
