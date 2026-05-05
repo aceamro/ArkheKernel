@@ -1,4 +1,4 @@
-# Release Keys — ArkheForge Runtime
+# Release Keys
 
 **Scope**: `runtime_doctor_journal` Ed25519 signing key + Release binary signing key. This document is the operational source of truth — the keys themselves are not committed to this repo (stored in hardware).
 
@@ -184,14 +184,14 @@ When a release tag is pushed, the `.github/workflows/ci.yml` `release-sign` job 
 | Type | Path |
 |---|---|
 | Release binaries | `target/release/dice-domain` |
-| Crate tarballs | `cargo package --no-verify` output of the 7 publish-true crates (`target/package/<crate>-0.13.0.crate`) |
+| Crate tarballs | `cargo package --no-verify` output of the publish-true crates (`target/package/<crate>-0.13.0.crate`) |
 
-Crate list: `arkhe-kernel`, `arkhe-macros`, `arkhe-forge-core`, `arkhe-forge-macros`, `arkhe-forge-platform`, `arkhe-forge`, `arkhe-runtime-testkit`. `arkhe-trait-default-check` and `examples/dice` stay `publish = false` and are not signed.
+Crate list: `arkhe-kernel`, `arkhe-macros`. `examples/dice` stays `publish = false` and is not signed.
 
 ### 9.3 Flow summary
 
 1. Deterministic build (`SOURCE_DATE_EPOCH` + `--remap-path-prefix`) produces the binaries — same environment as the §3 reproducibility job.
-2. In dependency order (`arkhe-macros` → `arkhe-kernel` → `arkhe-forge-macros` → `arkhe-forge-core` → `arkhe-forge-platform` → `arkhe-forge` → `arkhe-runtime-testkit`), run `cargo publish --dry-run --allow-dirty --no-verify -p <crate>` to assemble + validate each `.crate`. Whenever `cargo publish --dry-run` fails for any reason (e.g. a path-dep not yet on crates.io, a transient network error, registry throttling), the tarball for that crate is defensively skipped with a WARN — release tag signing is not blocked on it because the actual publish happens in a separate operator-gated workflow.
+2. In dependency order (`arkhe-macros` → `arkhe-kernel`), run `cargo publish --dry-run --allow-dirty --no-verify -p <crate>` to assemble + validate each `.crate`. Whenever `cargo publish --dry-run` fails for any reason (e.g. a path-dep not yet on crates.io, a transient network error, registry throttling), the tarball for that crate is defensively skipped with a WARN — release tag signing is not blocked on it because the actual publish happens in a separate operator-gated workflow.
 3. `cosign sign-blob --yes --bundle <artifact>.cosign.bundle <artifact>` per available artifact. The bundle packages the cert + signature + Rekor transparency log inclusion proof.
 4. `actions/upload-artifact@v4` uploads the entire `artifacts/` directory as `arkhe-release-<tag>`.
 
