@@ -6,8 +6,8 @@
  * CR-2, CR-3, CR-4, and R4-I refinement modules. Each refinement module
  * EXTENDs runtime_core and adds its module-specific invariant set.
  *
- * Anchored to runtime-book/src/en/architecture/11-axioms.md (E1-E15).
- * Apalache primary tooling per formal/tla-plus/README.md.
+ * Anchors the E1–E15 axiom system. Apalache primary tooling per
+ * formal/tla-plus/README.md.
  *)
 
 EXTENDS Naturals, Sequences, FiniteSets

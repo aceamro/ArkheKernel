@@ -25,8 +25,7 @@
  *   - E13-HybridDualSignBoth (MC, AND-mode positive form)
  *   - E13-PolicyMonotonic_Derivable (theorem from A14)
  *
- * Spec body sticky semantic anchor:
- * `runtime-book/src/en/architecture/11-axioms.md` E13 phrasing
+ * Spec body sticky semantic anchor for E13:
  * "after the tick at which a given shell declared Hybrid ...
  *  shell-per-tick sticky snapshot of SignatureClassPolicy ...
  *  monotone: once a shell declares Hybrid at tick T, all receipts
@@ -48,8 +47,7 @@
  * this module (signature class policy axis), with cr1 carrying
  * the chain-hash determinism axis.
  *
- * Anchored to:
- *   - runtime-book/src/en/architecture/11-axioms.md E11-E13
+ * Anchors the E11–E13 axioms.
  *
  * Apalache primary tooling. CI: `apalache-mc typecheck` per .tla.
  *)
@@ -295,10 +293,8 @@ HybridDualSignBoth ==
  * This theorem stands in for an explicit PolicyMonotonic state-
  * level invariant: it is a derivable consequence of integer
  * monotonicity + the tick-filtered helper definition, and the
- * corollary additionally requires A14 append-only. The spec body
- * sticky/latching wording at `runtime-book/src/en/architecture/
- * 11-axioms.md` E13 + §14.11 supplies the source-of-truth
- * narrative anchor.
+ * corollary additionally requires A14 append-only. The E13 sticky/
+ * latching wording supplies the source-of-truth narrative anchor.
  *)
 
 (* --- Concrete state machine refinement --- *)
@@ -407,8 +403,7 @@ SpecCR3 == InitCR3 /\ [][NextCR3]_vars_cr3
  *   actor_shell_binding      (carry-through, CR-2's domain)
  *   authenticated_actors     (carry-through, CR-2's domain)
  *   runtime_bootstrap        (carry-through opaque base; refined by
- *                            bootstrap_event below per Finding 1
- *                            absorption pattern)
+ *                            bootstrap_event below)
  *   signature_class_policy   (carry-through; refined by sticky-
  *                            Hybrid ShellPolicySnapshot derived
  *                            from policy_events sequence)

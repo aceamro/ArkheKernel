@@ -22,26 +22,21 @@
  *   - E9-MetaVerbDepthBounded (MC, hard cap 8)
  *
  * Scope: L0 + L1 + L2 cross-layer 3-tier hierarchy (E3 axiom
- * refinement) per `runtime-book/src/en/architecture/02-layers.md`
- * §2.1 + §2.2 — L1+L2 are in scope, L3+ explicitly out of scope.
- * L3 (Library/ECS) is declared in
- * `book/src/en/architecture/domain-spec.md` §"Layer distinctions"
- * but is the application-domain layer and carries no kernel-level
- * invariant requirement.
+ * refinement) — L1+L2 are in scope, L3+ explicitly out of scope.
+ * L3 (Library/ECS) is the application-domain layer and carries no
+ * kernel-level invariant requirement.
  *
- * Distinction from R4-X (`book/src/en/appendix/decisions.md` R4-X):
- * R4-X anchors the L0 kernel INTERNAL 4-stratum DAG (`abi → state
- * → runtime → persist`, single-crate intra-module DAG enforced by
- * cargo-modules CI gate at L0 build time). R4-I refines E3
- * cross-layer 3-tier — different abstraction level, not a
- * refinement of R4-X. R4-X citations elsewhere in this rustdoc
- * anchor R4-X as a sibling concept (L0-internal sealing axis),
- * not as the source axiom of `LayerImportStrictlyDownward`. R4-X
- * is Layer A DO NOT TOUCH item 6 (L0 sealed, runtime-book §16
- * references) — preserved verbatim, sealed at the L0 build-time
- * gate. The TLA+ refinement here captures the abstract E3 cross-
- * layer invariant that the cargo-modules CI gate enforces at
- * build time. (R4-X is a Layer A item ID, not a cycle ID.)
+ * Distinction from R4-X: R4-X anchors the L0 kernel INTERNAL
+ * 4-stratum DAG (`abi → state → runtime → persist`, single-crate
+ * intra-module DAG enforced by cargo-modules CI gate at L0 build
+ * time). R4-I refines E3 cross-layer 3-tier — different
+ * abstraction level, not a refinement of R4-X. R4-X is a sibling
+ * concept (L0-internal sealing axis), not the source axiom of
+ * `LayerImportStrictlyDownward`. R4-X is Layer A DO NOT TOUCH
+ * item 6 — preserved verbatim, sealed at the L0 build-time gate.
+ * The TLA+ refinement here captures the abstract E3 cross-layer
+ * invariant that the cargo-modules CI gate enforces at build
+ * time. (R4-X is a Layer A item ID, not a cycle ID.)
  *
  * Space coverage note: E8 spec body covers Entry/Space parent DAGs
  * symmetrically. The TLA+ catalog (README.md §11.3) records E8 as
@@ -58,9 +53,7 @@
  * TypeOK explicitly via `TypeOK /\ ...`. Both conventions are
  * shared with the other refinement modules.
  *
- * Anchored to:
- *   - runtime-book/src/en/architecture/11-axioms.md E3, E8, E9
- *   - book/src/en/appendix/decisions.md R4-X
+ * Anchors the E3 / E8 / E9 axioms + R4-X Layer A item 6.
  *
  * Apalache primary tooling. CI: `apalache-mc typecheck` per .tla.
  * TLC fallback documented for E8 acyclicity over large entry sets.
@@ -196,7 +189,7 @@ TypeOK_R4 ==
 \* L1 → L0 OK (LayerOrder L0=0 < L1=1); L2 → L1 OK (1 < 2); L2 → L0
 \* OK (0 < 2). L0 → anything FORBIDDEN (L0 sealed). L1 → L2
 \* FORBIDDEN per E3 explicit. Reverse imports fail the cargo-modules
-\* CI gate at build time per `book/src/en/architecture/overview.md`.
+\* CI gate at build time.
 \* (R4-X is the sibling L0-internal 4-stratum gate, not refined here.)
 LayerImportStrictlyDownward ==
     \A imp \in layer_imports :
@@ -278,8 +271,8 @@ MetaVerbDepthBounded ==
 \*     stratum, head-doc R4-X stratum classification)
 \*   - `arkhe-forge-platform/src/{hook_host,observer_host}/` (boundary
 \*     stratum)
-\*   - `book/src/en/appendix/decisions.md` R4-X (L0-internal sibling
-\*     concept; this INV extends the R4-X principle to L1+ runtime)
+\* R4-X is the L0-internal sibling concept; this INV extends the
+\* R4-X principle to L1+ runtime.
 ImportDirectionMonotone ==
     BoundaryModules \cap RuntimeModules = {}
 
@@ -400,11 +393,10 @@ SpecR4 == InitR4 /\ [][NextR4]_vars_r4
 
 (* --- R4-X sibling concept note (L0-internal, not refined here) ---
  *
- * R4-X (`book/src/en/appendix/decisions.md` R4-X — Layer DAG
- * one-way + cargo-modules CI gate) anchors the L0 kernel INTERNAL
- * 4-stratum DAG (`abi → state → runtime → persist`, single-crate
- * intra-module ordering — decisions.md rationale "Reverse imports
- * like `state → runtime → persist` could sneak in unintentionally").
+ * R4-X (Layer DAG one-way + cargo-modules CI gate) anchors the L0
+ * kernel INTERNAL 4-stratum DAG (`abi → state → runtime → persist`,
+ * single-crate intra-module ordering — reverse imports like
+ * `state → runtime → persist` could sneak in unintentionally).
  * R4-X is enforced by cargo-modules at L0 build time and operates
  * at the L0-internal abstraction level.
  *
@@ -422,8 +414,7 @@ SpecR4 == InitR4 /\ [][NextR4]_vars_r4
  * refinement here provides the formal-method anchor for the E3
  * cross-layer property the gate enforces.
  *
- * R4-X is Layer A DO NOT TOUCH item 6 per
- * `runtime-book/src/en/architecture/16-references.md` ordering:
+ * R4-X is Layer A DO NOT TOUCH item 6. The Layer A 8-item ordering:
  * (1) DOMAIN_CTX / (2) InvariantLifetime / (3) Principal+KernelEvent
  * +StepStage derives / (4) A11 MC tag / (5) ROADMAP Deferred section
  * / (6) R4-X DAG / (7) EventMask bit allocation / (8) WalRecord

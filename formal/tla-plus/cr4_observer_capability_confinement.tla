@@ -65,9 +65,7 @@
  *   - E15-CapTokenSealed (MC, sealed-trait safeguard companion)
  *   - E15-Adversary_B_ResidualReduction (lemma)
  *
- * Anchored to:
- *   - runtime-book/src/en/architecture/11-axioms.md E15 (line 36)
- *   - runtime-book/src/en/architecture/11-axioms.md §11.5 (line 68-72)
+ * Anchors the E15 axiom (4-clause Observer Capability Confinement).
  *
  * Apalache primary tooling. CI: `apalache-mc typecheck` per .tla.
  *)
@@ -542,7 +540,7 @@ SpecCR4 == InitCR4 /\ [][NextCR4]_vars_cr4
  *   - observer_cap_token_satisfies_sealed_bound  (mod.rs:822)
  *)
 
-(* --- Module-shape conventions (recorded for future maintainers) ---
+(* --- Module-shape conventions ---
  *
  * NextCR4 is self-contained: each refinement module declares its
  * own Next predicate rather than composing into a single global

@@ -13,9 +13,7 @@
  *      dylint + L2-Allow runtime sandbox dual realisation;
  *  (5) `Adversary_A_ResidualReduction` lemma (in comment block).
  *
- * Anchored to:
- *   - runtime-book/src/en/architecture/11-axioms.md E14
- *   - book/src/en/architecture/threat-model.md Adversary A
+ * Anchors: E14 axiom + Adversary A threat model.
  *
  * Apalache primary tooling per formal/tla-plus/README.md.
  * CI: `apalache-mc typecheck cr1_chain_hash_invariant.tla`.

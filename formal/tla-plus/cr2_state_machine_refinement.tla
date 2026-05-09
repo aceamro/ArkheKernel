@@ -30,8 +30,7 @@
  * level. No explicit state-level invariant is added; this comment
  * serves as the axiom-mapping anchor.
  *
- * Anchored to:
- *   - runtime-book/src/en/architecture/11-axioms.md E4-E7
+ * Anchors the E4–E7 axioms.
  *
  * Apalache primary tooling. CI: `apalache-mc typecheck` per .tla.
  * Bounded MC `apalache-mc check --inv=...` is run on demand per module.
