@@ -262,15 +262,15 @@ MetaVerbDepthBounded ==
 \*     RuntimeModules = {}` — Apalache-checkable static set disjointness
 \*   - Source-level enforcement (sufficient condition): CI grep gate
 \*     runs `grep -rE "use\s+(crate::)?(hook_host|observer_host)"` against
-\*     `arkhe-forge-platform/src/wasm_runtime_common/`; any reverse-edge
-\*     import (runtime → boundary) fails the lint job.
+\*     sibling ArkheForge `arkhe-forge-platform/src/wasm_runtime_common/`;
+\*     any reverse-edge import (runtime → boundary) fails the lint job.
 \*
 \* Anchored to:
 \*   - `.github/workflows/ci.yml` lint job R4-X verify step
-\*   - `arkhe-forge-platform/src/wasm_runtime_common/mod.rs` (runtime
-\*     stratum, head-doc R4-X stratum classification)
-\*   - `arkhe-forge-platform/src/{hook_host,observer_host}/` (boundary
-\*     stratum)
+\*   - sibling ArkheForge `arkhe-forge-platform/src/wasm_runtime_common/mod.rs`
+\*     (runtime stratum, head-doc R4-X stratum classification)
+\*   - sibling ArkheForge `arkhe-forge-platform/src/{hook_host,observer_host}/`
+\*     (boundary stratum)
 \* R4-X is the L0-internal sibling concept; this INV extends the
 \* R4-X principle to L1+ runtime.
 ImportDirectionMonotone ==

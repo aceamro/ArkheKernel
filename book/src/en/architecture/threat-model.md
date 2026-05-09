@@ -95,6 +95,6 @@ Subtotal: **25** (24 axioms + 1 social residual).
 | External dependency (subset of MACHINE-CHECKED) | **2** | A17 postcard library (canonicalization correctness), A14 fsync OS semantics (durability) |
 
 Growth in adversary capability erodes the lower three tiers (TYPE-ADJACENT,
-RUNTIME-ASSERTED, SOCIAL-CONTRACT — six items) over time. Per-item promotion paths are
-catalogued in the [Roadmap](../roadmap.md). CI gates and external dependencies erode only
-through toolchain regressions, supply-chain compromise, or OS bugs — a distinct threat class.
+RUNTIME-ASSERTED, SOCIAL-CONTRACT — six items) over time. CI gates and external dependencies
+erode only through toolchain regressions, supply-chain compromise, or OS bugs — a distinct
+threat class.

@@ -50,9 +50,9 @@ CR-4 modules, add a new module (`crX_*.tla`) and update the README.md mapping
 table at `formal/tla-plus/README.md`.
 
 **Step 3 — Rust impl test**. Add a test that exercises the runtime contract. Place
-it in sibling ArkheForge: `arkhe-forge-core/tests/axioms_e_series.rs` for E-series
+it in sibling ArkheForge — `arkhe-forge-core/tests/axioms_e_series.rs` for E-series
 axioms, or in the domain-specific test file when the axiom is realised in another
-crate (e.g., `arkhe-subset-rust-check` for E14.L1 deny-list,
+sibling-ArkheForge crate (e.g., `arkhe-subset-rust-check` for E14.L1 deny-list,
 `arkhe-forge-platform/src/hook_host/capability_linker.rs` for E14.L2). Test names
 must be unique and greppable as `fn <name>` (one identifier per axiom slot,
 multiple tests allowed when an axiom has multiple invariants).

@@ -198,8 +198,8 @@ In sibling ArkheForge, `arkhe-forge-platform/src/hook_host/capability_linker.rs`
 7. `EventMask` bit allocation
 8. `WalRecord` postcard field order
 
-`verify-l0-baseline.sh` enforces the 31-files SHA-256 baseline; the formal/ tree lives outside `arkhe-kernel/src` and `arkhe-macros/src`, so these specs cannot mutate Layer A by construction.
+`verify-l0-baseline.sh` enforces the 32-files SHA-256 baseline; the formal/ tree lives outside `arkhe-kernel/src` and `arkhe-macros/src`, so these specs cannot mutate Layer A by construction.
 
 ### Test count baseline
 
-7-config workspace baseline: default 540 / federation-archive 543 / audit-receipt 544 / both 548 / tier-2-hook 611 / tier-2-observer 585 / all-features 695. The Kani crate is workspace-excluded via an empty `[workspace]` table and is invisible to `cargo test --workspace`.
+2-config workspace baseline (default + all-features) — current test counts pinned in `ci/test-baselines.txt`.
