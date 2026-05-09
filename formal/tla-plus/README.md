@@ -121,7 +121,7 @@ sealing cut.
 ## Layer A non-violation anchor (sealing constraint)
 
 - **L0 unchanged**: TLA+ specs do NOT modify `arkhe-kernel/src/**` or
-  `arkhe-macros/src/**`. `verify-l0-baseline.sh` enforces the 31-files
+  `arkhe-macros/src/**`. `verify-l0-baseline.sh` enforces the 32-files
   SHA-256 baseline.
 - **Path placement**: `formal/tla-plus/` is workspace-root sibling to
   `arkhe-kernel/`, NOT inside L0 source tree. The companion Kani

@@ -35,11 +35,11 @@ hybrid_extension = "Hybrid variant + dual-sign AND-mode verify path (Ed25519 + M
 note = "crypto-primitive black-box, axiom black-box treatment"
 
 [cr_anchors.cr_pqc_hsm_extension]
-description = "HSM/KMS PQC provider trait (forward-compat for v0.13+ providers)"
+description = "HSM/KMS PQC provider trait (sealed-trait extension seam)"
 location = "arkhe-kernel/src/persist/signature.rs::PqcSigner / PqcVerifier (sealed traits, see L80-89 + L91-96)"
 sealed_trait_pattern = "private_seal::Sealed bound prevents external impl injection (e.g., compromised HSM impl from other crate cannot register) — sibling A24 lineage"
 status = "Software-only PQC providers (SoftwareMlDsa65{Signer,Verifier}). HSM/KMS provider impls live behind the same sealed-trait pattern (PqcSigner / PqcVerifier)."
-note = "no axiom anchor this cycle; sealed-trait safeguard + private module bound = security boundary mechanism"
+note = "no axiom anchor; sealed-trait safeguard + private module bound = security boundary mechanism"
 
 # ============================================================
 # E1 — Core 5 primitive set (definitional foundation)

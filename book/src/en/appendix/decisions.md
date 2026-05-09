@@ -47,8 +47,9 @@ the same shape: problem → decision → rationale → rejected alternatives.
 
 - **Problem**: If `PanicInfo.message: String` lives on `ObserverPanic`, the kernel leaks
   arbitrary bytes into the WAL/observer path.
-- **Decision**: `ObserverPanic { observer_index: u16 }` only — payload-free. The legitimate
-  control-flow side-channel is the existing `Result`-style return on `KernelObserver::on_event`.
+- **Decision**: `ObserverPanic { observer_index: u16 }` only — payload-free.
+  `KernelObserver::on_event` returns `()`, so observers have no return-value
+  channel; the only kernel-visible signal is the panic-eviction event (A22).
 - **Rationale**: Limits covert capacity; replaces covert reliance with an explicit channel.
 - **Rejected**: Keeping `PanicInfo` (unbounded exfiltration); removing `catch_unwind` (one bug
   crashes the kernel); counter-only (hostile to debugging).

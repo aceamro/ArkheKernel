@@ -35,7 +35,6 @@ Layer independence is one-way: L0 ← Runtime ← Shell. Shell repositories
 | Document | Purpose |
 |----------|---------|
 | [`runbook/tier-0-limitations.md`](runbook/tier-0-limitations.md) | Tier-0 (software-KEK dev) deployment boundary + limits. |
-| [`runbook/l2-single-active-operations.md`](runbook/l2-single-active-operations.md) | Active-passive L2 single-active model + SLO suspension protocol. |
 
 ---
 

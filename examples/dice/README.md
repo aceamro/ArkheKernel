@@ -1,44 +1,40 @@
-# 🎲 Dice Temple Domain
+# Dice Temple Domain
 
-**Dice Temple** is a high-integrity proof-of-concept domain for **ArkheKernel**. It demonstrates the kernel's ability to enforce mathematical causality and perform bit-level deterministic replays.
+`dice-domain` is a small ArkheKernel example domain that exercises the
+deterministic-replay path with a 3D6 dice roller. It is shipped as an
+illustrative integration test for the kernel's WAL + replay machinery, not
+as a production gambling primitive.
 
-## 🏛️ Concept
-In a traditional centralized application, "Randomness" is often a black box controlled by the server admin. In **Dice Temple**, randomness is a deterministic function of the **Global Seed** and **Historical Context**. This makes every roll verifiable, auditable, and perfectly reproducible.
+## What it demonstrates
 
-## 🚀 Key Features
+### Deterministic entropy
 
-### 1. Cryptographic Entropy Derivation
-- Uses the **BLAKE3** hash function to derive 3D6 results.
-- Entropy Source: `blake3(action.seed || tick || nonce)` — every input is
-  carried in the action body, so replay is independent of instance state.
-- Prevents "Timing Attacks" by anchoring the outcome to kernel-managed time.
+- 3D6 outcomes are derived from a BLAKE3 hash of the action body
+  (`blake3(action.seed || tick || nonce)`).
+- Every input is carried in the action body, so replay is independent of
+  instance state and free of clock or RNG side effects.
 
-### 2. State Lifecycle Management
-- **`Op::SpawnEntity`**: Atomic allocation of digital actors.
-- **`Op::EmitEvent`**: Deterministic outcome emission, captured by the
-  observer pipeline and recorded in the WAL.
+### Action surface
 
-### 3. Fault-Tolerance & Reconstruction (A1 D1-Total)
+- `Op::SpawnEntity` — atomic actor allocation.
+- `Op::EmitEvent` — outcome emission, captured by the observer pipeline and
+  recorded in the WAL.
+
+### A1 D1-Total replay check
+
 - First pass runs N rolls against a `Kernel::new_with_wal(...)` instance and
   exports the resulting `Wal`.
 - Second pass hands that `Wal` to a fresh kernel of the same shape via
   `persist::replay_into`.
-- Both the BLAKE3 keyed chain tip and every captured outcome must match
-  bit-for-bit. If a single byte of the action body, principal, tick, or
-  step-stage ordering varied, the chain tips would diverge.
+- The BLAKE3 keyed chain tip and every captured outcome must match
+  bit-for-bit. A single byte of divergence in the action body, principal,
+  tick, or step-stage ordering changes the chain tip.
 
-## 🛠️ Execution
-To run the Dice Temple simulation and witness the integrity verification:
+## Running
 
 ```bash
 cargo run -p dice-domain
 ```
 
-## 📊 Evaluation Results
-The following invariants are guaranteed by this domain:
-- **Provable Fairness**: Every dice roll can be audited against the master seed.
-- **Perfect Continuity**: Any world destroyed in Tick $N$ can be perfectly resurrected from Tick $0$.
-- **Zero Variance**: The replayed history is bit-for-bit identical to the original execution.
-
----
-*Powered by ArkheKernel - Enforcing Causality across Virtual Worlds.*
+The binary prints the rolls produced by the first pass, replays them on a
+fresh kernel, and asserts chain-tip + outcome equality.
