@@ -58,7 +58,7 @@ APIs **forbidden** inside `Action::compute(&self, &ActionContext) -> Vec<Op>`:
 | External-crate `Ord` impls (non-`CanonicalOrd`) | Ordering drift between patch releases |
 | `std::fs::*`, `std::net::*`, `std::process::*` | I/O — belongs to observers |
 
-In a future extension, the `#[kernel_pure]` dylint rejects the list above at compile time.
+A `#[kernel_pure]` dylint that rejects the list above at compile time is a candidate hardening path.
 
 ### 3. Canonical value wrappers (reserved)
 
@@ -80,10 +80,8 @@ The current release is satisfied by postcard + `serde::{Serialize, Deserialize}`
 (S1). Implementer obligations:
 1. `now()` is non-decreasing within a single kernel process.
 2. It does not non-deterministically interpolate ambient sources (NTP, system-clock swing, etc.).
-3. Violations are audited via `KernelEvent::ClockAnomaly`; the kernel preserves forward progress
-   using `max(observed, previous)`.
-
-A future extension, the typestate `impl Monotonic<Tick>`, removes this residual.
+3. The kernel preserves forward progress using `max(observed, previous)` so a regressing clock
+   cannot rewind logical time.
 
 ### 5. Pure-compute fairness (declared L2 axiom)
 

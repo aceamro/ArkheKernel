@@ -11,11 +11,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # 7-config test matrix. Each matrix job runs
-  # `cargo test --workspace <flags>` for one umbrella feature combo and
-  # asserts the passed test count matches `ci/test-baselines.txt` (drift
-  # forces operator update + Layer A/L0 verify). PR=fail-fast (dev iterates
-  # faster) / main=no fail-fast (full postmortem coverage).
+  # 2-config test matrix (default + all-features). Each matrix job runs
+  # `cargo test --workspace <flags>` and asserts the passed test count
+  # matches `ci/test-baselines.txt` (drift forces operator update +
+  # Layer A/L0 verify). PR=fail-fast (dev iterates faster) / main=no
+  # fail-fast (full postmortem coverage).
   test:
     name: test (${{ matrix.config.name }})
     runs-on: ubuntu-latest
@@ -95,8 +95,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-lint-
 
-      # arkhe-kernel + arkhe-macros 는 기존 fmt convention 보존
-      # (L0 + proc-macro 의 syn 패턴 유지). examples/dice 만 rustfmt default 검증.
+      # arkhe-kernel + arkhe-macros preserve their existing fmt
+      # convention (L0 + proc-macro / syn patterns). Only examples/dice
+      # is checked under rustfmt defaults.
       - run: cargo fmt -p dice-domain -- --check
 
       - run: cargo clippy --workspace --no-deps --all-targets -- -D warnings

@@ -66,7 +66,8 @@ reference, spec anchor).
   monotonicity).
 - TLA+ refinement modules — `cr1` chain hash invariant, `cr2`
   state-machine refinement, `cr3` replay determinism, `cr4` observer
-  capability confinement.
+  capability confinement, `r4_implementation_refinement` layer-DAG
+  enforcement — sharing the `runtime_core` base module.
 - Apalache typecheck CI gate runs on every push.
 - Implementation-level Kani harness suite lives in the sibling
   [`ArkheForge`](https://github.com/aceamro/ArkheForge) repository

@@ -237,7 +237,7 @@ MetaVerbDepthBounded ==
 \*
 \* Scope: L1+ runtime sandbox sub-DAG (separate from R4-X's L0-internal
 \* `abi → state → runtime → persist` DAG documented in the R4-X sibling
-\* concept note below). Within `arkhe-forge-platform`:
+\* concept note below). Within sibling ArkheForge `arkhe-forge-platform`:
 \*   - Boundary stratum: `hook_host` + `observer_host` (sandbox-facing
 \*     wasmtime hosts that own host-fn dispatch + cap-token gating)
 \*   - Runtime stratum: `wasm_runtime_common` (chain-effect-aware
@@ -250,7 +250,7 @@ MetaVerbDepthBounded ==
 \* (`.github/workflows/ci.yml` R4-X verify step) enforces this at the
 \* source-code level via `grep -E "use\s+
 \* (crate::)?(hook_host|observer_host)"` against
-\* `arkhe-forge-platform/src/wasm_runtime_common/`; this INV is the
+\* sibling ArkheForge `arkhe-forge-platform/src/wasm_runtime_common/`; this INV is the
 \* TLA+-abstract companion that names the property in the formal layer.
 \*
 \* The INV body captures the *necessary precondition* (boundary/runtime

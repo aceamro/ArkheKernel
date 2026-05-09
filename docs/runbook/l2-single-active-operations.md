@@ -106,7 +106,7 @@ At suspension end, a corresponding `slo-suspension-end` entry. **Cumulative susp
 - Total suspension / quarter ≤ **2 hours** (120 min).
 - Individual suspension maximum 30 min (escalation to operator if exceeded).
 
-**Beta goal** (future extension production):
+**Beta goal** (production target):
 - Total suspension / quarter ≤ **30 min**.
 - Individual suspension maximum 15 min.
 

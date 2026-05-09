@@ -1,8 +1,9 @@
 # MSRV Policy — Minimum Supported Rust Version
 
-**Purpose**: pin the **Minimum Supported Rust Version (MSRV)** for both
-the L0 kernel and the ArkheForge Runtime so toolchain changes never
-violate the "later releases must not destabilise earlier ones" directive.
+**Purpose**: pin the **Minimum Supported Rust Version (MSRV)** for the
+L0 kernel (and the sibling ArkheForge Runtime under the same baseline)
+so toolchain changes never violate the "later releases must not
+destabilise earlier ones" directive.
 
 ---
 
@@ -31,8 +32,6 @@ the cargo-features needed by the workspace (dependency inheritance,
 
 **Rationale**:
 
-- Implementation plan §16: "MSRV: Rust stable 1.80+ (matches L0). Do not
-  bump within the current release."
 - "Later releases must not destabilise earlier ones" directive — MSRV
   changes propagate into downstream shell toolchains, so a post-alpha
   MSRV change is a breaking change.
@@ -58,7 +57,7 @@ is published, and the patch requires a newer MSRV.
 - Confirm the `CVE-YYYY-NNNN` ID + affected range.
 - Determine the minimum bump (e.g. 1.80 → 1.83, not 1.85).
 - Handle as a future-extension DIP (not a current-release patch).
-- Record the security-driven MSRV bump in `docs/drift-log.md`.
+- Record the security-driven MSRV bump in `CHANGELOG.md`.
 
 ### 3.2 Ecosystem crate MSRV bump (strong dependency)
 
@@ -112,8 +111,8 @@ adopt a pin:
 
 **Pro**:
 
-- Reproducibility — implementation plan §18 — "same toolchain → same
-  binary" enforced automatically.
+- Reproducibility — "same toolchain → same binary" enforced automatically
+  (see `docs/build-reproducibility.md`).
 - Developer / CI parity — local builds and CI use the same compiler.
 
 **Con**:
@@ -142,14 +141,13 @@ the top priority.
 
 ## 7. Promise to downstream shells
 
-Shell maintainers (e.g. BBS) get this commitment:
+Downstream shell maintainers get this commitment:
 
 - Minor bumps **do not** change MSRV.
 - **Major-impact bumps** may change MSRV — only after §3 conditions are
   met and the 6-week notice has been given.
-- An MSRV-driven shell breakage **is a breaking change**. Unlike the
-  deprecation policy (implementation plan §5), no 2-version grace
-  period applies — MSRV is a toolchain setting and takes effect
+- An MSRV-driven shell breakage **is a breaking change**. No 2-version
+  grace period applies — MSRV is a toolchain setting and takes effect
   immediately.
 
 ---
@@ -168,12 +166,9 @@ Shell maintainers (e.g. BBS) get this commitment:
 
 ## 9. References
 
-- Implementation plan §16 — MSRV 1.80+ pin.
-- Implementation plan §5 — public API freeze + deprecation policy.
-- Implementation plan §17 — runtime version-upgrade path + downstream
-  impact.
-- Implementation plan §18 — supply-chain security + toolchain pin +
-  reproducibility.
+- `Cargo.toml` `[workspace.package]` — `rust-version = "1.80"` pin.
+- `docs/build-reproducibility.md` — same-toolchain → same-binary policy.
+- `CHANGELOG.md` — release notes.
 
 ---
 

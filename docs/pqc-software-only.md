@@ -37,7 +37,7 @@ When HSM / KMS providers are added behind the `PqcSigner` seam, four categories 
 1. **Provider-specific `PqcSigner` impls.** Each HSM vendor (e.g., Thales Luna, Entrust nShield, AWS CloudHSM) exposes PQC primitives via PKCS#11 or vendor SDKs. The `PqcSigner` trait is the integration seam — provider impls wrap the vendor API and satisfy the trait contract. The kernel itself requires no changes beyond unsealing the trait.
 2. **Operator key-attestation flow.** Production HSMs emit attestation statements proving that a signing key was generated inside the secure boundary. Attestation verification integrates into the kernel boot sequence via a `RuntimeBootstrap` event extension.
 3. **Multi-region / multi-HSM redundancy.** High-availability deployments need quorum signing or cross-HSM key replication. A `PqcSignerQuorum<N>` wrapper composing multiple `Box<dyn PqcSigner>` providers covers this; kernel `SignatureClass::Hybrid` composes orthogonally.
-4. **Migration tooling.** Operators running the software signer in production (Tier 0 / Tier 1) will need a migration path to HSM-backed signers. The intended shape is `arkhe-runtime-doctor pqc-migrate-software-to-hsm`: an offline batch that re-signs the chain tip under the new HSM key and emits a `SignatureClassPolicy` event documenting the transition.
+4. **Migration tooling.** Operators running the software signer in production (Tier 0 / Tier 1) will need a migration path to HSM-backed signers. The intended shape is an `arkhe-runtime-doctor pqc-migrate-software-to-hsm` command (sibling ArkheForge runtime tooling): an offline batch that re-signs the chain tip under the new HSM key and emits a `SignatureClassPolicy` event documenting the transition.
 
 ## References
 

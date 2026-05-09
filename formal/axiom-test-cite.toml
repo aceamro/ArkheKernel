@@ -8,7 +8,7 @@
 # Anchored to:
 #   - the E1-E15 Runtime axiom set
 #   - formal/tla-plus/{runtime_core,cr1,cr2,cr3,cr4,r4}.tla (TLA+ refinement)
-#   - sibling ArkheForge: arkhe-runtime-proofs/src/lib.rs (Kani 4-property suite)
+#   - sibling ArkheForge: arkhe-runtime-proofs/src/lib.rs (Kani 5-property suite)
 
 [meta]
 schema_version = 1
@@ -20,9 +20,7 @@ cycle = "v0.13"
 # CR-N anchors — Cryptographic refinement primitive class siblings
 # (impl-cite anchors for crypto primitives that the chain hash /
 #  signature pipeline treats as black boxes — no spec body lemma,
-#  no TLA+ INV at this anchor class. PQC Hybrid entry will add
-#  HybridDualSignBoth_implies_* lemma in cr1.tla or cr3.tla, at
-#  which point step 11 typecheck becomes mandatory.)
+#  no TLA+ INV at this anchor class.)
 # ============================================================
 [cr_anchors]
 description = "Cryptographic refinement primitive anchors (CR-N class siblings)"
@@ -102,7 +100,7 @@ note = "documentation"
 name = "R4-X DAG"
 formal_anchor = true
 scope = "L0-internal 4-stratum (abi/state/runtime/persist)"
-sibling_to = "E3 cross-layer 3-tier (post-N6.2 Option B+ reconciliation)"
+sibling_to = "E3 cross-layer 3-tier"
 e_inheritance = []
 
 [layer_a_items.item_7]

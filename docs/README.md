@@ -39,5 +39,4 @@ Layer independence is one-way: L0 ← Runtime ← Shell. Shell repositories
 
 ---
 
-*Repo-level entry points: [`README.md`](../README.md) (English),
-[`README.ko.md`](../README.ko.md) (Korean), [`CHANGELOG.md`](../CHANGELOG.md).*
+*Repo-level entry points: [`README.md`](../README.md), [`CHANGELOG.md`](../CHANGELOG.md).*

@@ -5,7 +5,7 @@ to any L1 application — BBS, games, lotteries, simulations, and so on.
 
 ## Prerequisites
 
-- Rust **1.90+** (stable, 2021 edition).
+- Rust **1.80+** (stable, 2021 edition).
 - Add ArkheKernel as a workspace member or depend on it with
   `path = "../arkhe-kernel"`.
 
@@ -20,7 +20,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-arkhe-kernel = "0.10"
+arkhe-kernel = "0.13"
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", features = ["use-std"] }
 bytes = "1"

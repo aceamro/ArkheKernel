@@ -250,4 +250,4 @@ see 1, fix it and run again to surface any further issues.
 - `formal/tla-plus/README.md` — TLA+ refinement narrative + E1-E15 ↔ INV table.
 - Runtime axiom set (E1-E15) — canonical narrative carried by the inventory + this guide.
 - Sibling ArkheForge: `arkhe-forge-core/tests/axioms_e_series.rs` — E1-E13 impl tests.
-- Sibling ArkheForge: `arkhe-runtime-proofs/src/lib.rs` — Kani 4-property suite.
+- Sibling ArkheForge: `arkhe-runtime-proofs/src/lib.rs` — Kani 5-property suite.

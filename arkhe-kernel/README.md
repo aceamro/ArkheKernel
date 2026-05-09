@@ -171,9 +171,11 @@ not for first-time users.
   (observer first-panic eviction, 1), or *social-contract* (S1: clock
   monotonicity). See [`book/`](book/) for the full per-axiom
   breakdown.
-- **TLA+ refinement** — four modules (`cr1` chain hash invariant,
-  `cr2` state-machine refinement, `cr3` replay determinism, `cr4`
-  observer capability confinement). Apalache typecheck on every push.
+- **TLA+ refinement** — five refinement modules (`cr1` chain hash
+  invariant, `cr2` state-machine refinement, `cr3` replay determinism,
+  `cr4` observer capability confinement, `r4_implementation_refinement`
+  layer-DAG enforcement) on a shared `runtime_core` base. Apalache
+  typecheck on every push.
 - **Kani harness suite** — 5 implementation-level proofs in the
   sibling ArkheForge repository (published alongside v0.13):
   `authorize`, `dispatch`, `replay`, `memory_bounds_check`, and

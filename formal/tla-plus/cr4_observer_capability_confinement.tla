@@ -46,7 +46,7 @@
  * uncontrolled syscall egress. E15.a closes the native-crash
  * channel; E15.b closes uncontrolled egress. Residual: (i) host-
  * call API implementation defects + (ii) wasmtime engine zero-day
- * (out-of-scope per `docs/implementation-plan.md` §19, symmetric
+ * (out-of-scope under the project residual policy, symmetric
  * with E14.L2 wasmtime zero-day exclusion).
  *
  * Symmetric counterparts:
@@ -248,9 +248,9 @@ QuarantineHostSupervised ==
 \* invariant.
 \*
 \* Anchored to:
-\*   - arkhe-forge-platform/src/wasm_runtime_common/mod.rs:299-329
+\*   - sibling ArkheForge: arkhe-forge-platform/src/wasm_runtime_common/mod.rs:299-329
 \*     (HookCapTokenSealed + ObserverCapTokenSealed trait definitions)
-\*   - arkhe-forge-platform/src/wasm_runtime_common/mod.rs:813,822
+\*   - sibling ArkheForge: arkhe-forge-platform/src/wasm_runtime_common/mod.rs:813,822
 \*     (witness tests hook_cap_token_satisfies_sealed_bound +
 \*      observer_cap_token_satisfies_sealed_bound)
 CapTokenSealed ==
@@ -462,12 +462,12 @@ SpecCR4 == InitCR4 /\ [][NextCR4]_vars_cr4
  *   (i)  Host-call API implementation defects — addressed by the
  *        Kani memory bounds-check property at the impl level plus
  *        integration tests in the sister repo's observer_host
- *        crate (arkhe-forge-platform/src/observer_host/).
+ *        crate (sibling ArkheForge: arkhe-forge-platform/src/observer_host/).
  *        Residual implementation defects are out-of-scope at the
  *        TLA+ refinement level.
  *
  *   (ii) wasmtime engine zero-day — out-of-scope per
- *        `docs/implementation-plan.md` §19, symmetric with E14.L2
+ *        the project residual policy, symmetric with E14.L2
  *        wasmtime zero-day exclusion. The reduction is conservative:
  *        any adversary path not in (i)/(ii) is closed by E15 at the
  *        formal-method level.

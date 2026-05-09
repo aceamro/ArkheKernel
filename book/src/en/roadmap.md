@@ -24,15 +24,15 @@ in the deferred set.
 
 - **R4-J Subset-Rust pure L1 checker** — statically blocks non-A11 APIs from domain crates;
   promotes `ActionCompute::compute()` purity from SOCIAL-CONTRACT (declaration) to MACHINE-CHECKED.
-  *(Subset-Rust checker landed in `ArkheForge/arkhe-subset-rust-check`.)*
+  *(Subset-Rust checker landed in sibling ArkheForge: `arkhe-subset-rust-check`.)*
 - **WASM sandbox option for L1** — alternative to Subset-Rust; instruction counter for runtime
   fairness; complementary to R4-J.
-  *(wasmtime-based runtime sandbox landed in `ArkheForge`.)*
+  *(wasmtime-based runtime sandbox landed in sibling ArkheForge.)*
 - **Per-step cycle-budget watchdog** — refuses further Op dispatch inside `step()` when the
   cycle count exceeds a per-instance ceiling. Runtime counterpart of the memory budget.
 - **Implementation-level proofs (Kani / Creusot)** — beyond TLA+ specifications; machine-checked
   Rust property proofs for authorize, dispatch, and replay.
-  *(Kani harness suite landed in `ArkheForge/arkhe-runtime-proofs`. Creusot remains deferred.)*
+  *(Kani harness suite landed in sibling ArkheForge: `arkhe-runtime-proofs`. Creusot remains deferred.)*
 - **WAL streaming export** — incremental fsync as each record arrives (the current release is
   buffer-then-export).
 - **Snapshot + WAL hybrid replay** — start from a snapshot and apply tail WAL records.

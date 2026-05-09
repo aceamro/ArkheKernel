@@ -106,7 +106,7 @@ automatically at `apalache-mc typecheck` time.
   determinism) residual reduction. E14.L1-Deny + E14.L2-Allow combined
   reduce the residual surface to (i) host-import allow-list compromise
   and (ii) wasmtime engine zero-day, both out-of-scope per
-  `docs/implementation-plan.md` §19.
+  the project residual policy.
 
 - **CR-4** anchors **Adversary B** (chain-non-affecting observer
   mutation bypass) residual reduction. E15.a panic close + E15.b
@@ -139,12 +139,12 @@ sealing cut.
 |---|---|---|
 | Phase 1 (Foundation) | `runtime_core.tla` base module + Apalache CI + Kani scaffold | ✅ closed |
 | Phase 2 (TLA+ refinement) | 5 modules: CR-1 + CR-2 + CR-3 + R4-I + CR-4 | ✅ closed |
-| Phase 3 (Kani implementation proofs) | 4-property suite | ✅ closed |
+| Phase 3 (Kani implementation proofs) | 5-property suite | ✅ closed |
 | Phase 4 (Cycle close) | this section + Layer A verbatim verify + baseline preservation | ✅ closed |
 
 **Repo-split history note (transparency):** the v0.13 ArkheSourceKernel→ArkheKernel split (initial-commit `eefc929`, 2026-05-03) carried `cr1`/`cr2`/`cr3`/`cr4_*.tla` but transiently dropped two orphan modules — `runtime_core.tla` and `r4_implementation_refinement.tla`. Both were restored in the post-publish CI recovery on 2026-05-04: `a246754` (runtime_core.tla restore + `ci/l0-baseline-hashes.txt` regen for the new repo path) and `ee2687b` (r4_implementation_refinement.tla restore). The Phase 1 + Phase 2 closure claims above describe the substantive verification state — once again backed by every cited module being present in this working tree. See `CHANGELOG.md` and `git log a246754..ee2687b` for the recovery audit trail.
 
-### Kani 4-property suite ↔ axiom mapping
+### Kani 5-property suite ↔ axiom mapping
 
 In sibling ArkheForge, `arkhe-runtime-proofs/src/lib.rs`:
 
@@ -154,6 +154,7 @@ In sibling ArkheForge, `arkhe-runtime-proofs/src/lib.rs`:
 | `kani_dispatch_property` | E14 (Compute Determinism Closure) | MC (build-time L1 + runtime L2) | Twice-dispatch determinism — pure function |
 | `kani_replay_property` | A1 (L0 bit-identical replay) via E14 closure | MC (inherited from L0) | Twice-fold determinism — abstract fold |
 | `kani_memory_bounds_check_property` | E14.L2 (firm contract anchor) | MC (runtime sandbox) | Pre-deref bounds check — 3-branch exhaustive (Overflow branch structurally unreachable under bounded MC; the verification scope is the in-bounds + OOB partition) |
+| `kani_hybrid_and_mode_property` | E13 (HybridDualSignBoth + NoPqcDowngradeAttack) | MC (PQC AND-mode) | Hybrid dual-sign — both Ed25519 + ML-DSA 65 verifies must pass |
 
 ### Cumulative formal-method coverage
 
@@ -163,13 +164,13 @@ In sibling ArkheForge, `arkhe-runtime-proofs/src/lib.rs`:
   - CR-3: 5 INVs (`RuntimeBootstrapChainAnchored` + `ManifestDriftReplayRejected` + `CascadeOpDeterministicTickPlacement` + `NoSignatureDowngradeAfterPolicy` + `NoPqcDowngradeAttack`) + 1 theorem (`PolicyMonotonic_Derivable`)
   - R4-I: 5 INVs (`LayerImportStrictlyDownward` + `EntryParentDagDepthBounded` + `EntryParentDagAcyclic` + `ActivitySelfLoopBlocked` + `MetaVerbDepthBounded`)
   - CR-4: 3 INVs (`ObserverChainNonAffecting` + `ObserverCapabilityConfined` + `QuarantineHostSupervised`) + 1 theorem (`ChainProgressionUnaffectedByObserver`) + 1 lemma (Adversary B residual)
-- **Kani implementation proofs**: 4 properties (impl-level, complement TLA+ refinement)
+- **Kani implementation proofs**: 5 properties (impl-level, complement TLA+ refinement)
 - **Axiom coverage**: E3 + E4 + E5 + E6 + E7 + E8 + E9 + E11 + E12 + E13 + E14 + E15 + A1 (12 of 15 E-axioms + L0 A1 inheritance; E1 + E2 + E10 not requiring TLA+ refinement per `runtime_core.tla` foundation)
 
 ### Sealing chain — formal-method level closure
 
 **Adversary axis closures**:
-- **CR-1 (E14, Adversary A)** — chain-affecting compute determinism. Pre-E14 surface (clock/RNG/I/O/FFI/non-canonical NaN/SIMD/threading) closed by L1-Deny + L2-Allow dual realisation. Residual: (i) host-import allow-list compromise + (ii) wasmtime engine zero-day, both out-of-scope per `docs/implementation-plan.md` §19.
+- **CR-1 (E14, Adversary A)** — chain-affecting compute determinism. Pre-E14 surface (clock/RNG/I/O/FFI/non-canonical NaN/SIMD/threading) closed by L1-Deny + L2-Allow dual realisation. Residual: (i) host-import allow-list compromise + (ii) wasmtime engine zero-day, both out-of-scope under the project residual policy.
 - **CR-3 (E13, PQC downgrade adversary)** — chain-anchored signature class policy. Pre-E13 surface (verifier trusts message-tag without chain anchor) closed by sticky-Hybrid `ShellPolicySnapshotAtTick` + `NoPqcDowngradeAttack` + `NoSignatureDowngradeAfterPolicy`. Residual: (i) WAL forge before chain-anchored detection + (ii) BLAKE3 collision, both out-of-scope.
 - **CR-4 (E15, Adversary B)** — chain-non-affecting observer mutation bypass. Pre-E15 surface (native panic propagation + uncontrolled syscall egress) closed by E15.a sandbox boundary catch (atomic ObserverPanic + ObserverQuarantine emission with `emitter="HOST"`) + E15.b capability-token confinement (`{PgWrite}`). Residual: (i) host-call API impl defects (complemented by `kani_memory_bounds_check_property` at impl level) + (ii) wasmtime zero-day, both out-of-scope (symmetric with E14.L2 exclusion).
 

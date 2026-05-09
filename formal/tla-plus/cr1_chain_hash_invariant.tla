@@ -93,7 +93,7 @@ ChainHashDeterministic == chain_tip = ChainHashFn[wal]
 
 \* INV ComputePurityHonored — E14 dual realisation enforced.
 \* L1-Deny: every fn applied to wal contents is in `ComputeFns`
-\* (build-time `arkhe-subset-rust-check` dylint enforces this on the
+\* (build-time `arkhe-subset-rust-check` dylint in sibling ArkheForge enforces this on the
 \* Rust side; the TLA+ refinement abstracts the deny-list as the
 \* `ComputeFns` set). L2-Allow: host imports restricted to the
 \* whitelist (runtime wasmtime sandbox enforces).
@@ -125,9 +125,9 @@ ComputePurityHonored ==
 \* Apalache typecheck capture the sealed-trait strengthening event.
 \*
 \* Anchored to:
-\*   - arkhe-forge-platform/src/wasm_runtime_common/mod.rs:394
+\*   - sibling ArkheForge: arkhe-forge-platform/src/wasm_runtime_common/mod.rs:394
 \*     (`pub trait SealedHostImport: private_seal::Sealed`)
-\*   - arkhe-forge-platform/src/wasm_runtime_common/mod.rs:898,910
+\*   - sibling ArkheForge: arkhe-forge-platform/src/wasm_runtime_common/mod.rs:898,910
 \*     (witness tests hook_capability_linker_satisfies_sealed_host_import
 \*      + observer_capability_linker_satisfies_sealed_host_import)
 HostImportSealed ==
@@ -207,11 +207,11 @@ SpecCR1 == InitCR1 /\ [][NextCR1]_vars
  * determinism reduces under E14.L1-Deny + L2-Allow combined to:
  *   (i)  host-import allow-list compromise (operator scope);
  *   (ii) wasmtime engine zero-day (vendor scope).
- * Both are out-of-scope per `docs/implementation-plan.md` §19.
+ * Both are out-of-scope under the project residual policy.
  *
  * Mechanical reduction by source category:
  *  - clock / RNG / I/O / FFI / `unsafe` block in compute body
- *      -> rejected at build by `arkhe-subset-rust-check`
+ *      -> rejected at build by `arkhe-subset-rust-check` (sibling ArkheForge)
  *         (E14.L1-Deny 4-rule MVP);
  *  - non-canonical NaN, non-deterministic SIMD ops
  *      -> rejected by wasmtime config (`cranelift_nan_canonicalization

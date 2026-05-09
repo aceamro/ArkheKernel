@@ -458,7 +458,7 @@ SpecCR3 == InitCR3 /\ [][NextCR3]_vars_cr3
  *        guarantees);
  *   (ii) Cryptographic collision in BLAKE3 chain hash
  *        (cryptographic primitive failure, out-of-scope per
- *        `docs/implementation-plan.md` §19, symmetric with
+ *        the project residual policy, symmetric with
  *        E14.L2 wasmtime zero-day exclusion).
  *
  * Symmetric counterpart: CR-1 Adversary A residual reduction

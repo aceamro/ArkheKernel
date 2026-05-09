@@ -90,7 +90,7 @@ Operators must verify every item before each deploy. Each missed item drives the
 
 ### 4.3 Runtime configuration
 
-- [ ] **Manifest `runtime_max = "0.15"`** observed — v0.16+ binaries emit `ManifestError::SoftwareKekNotPermitted` at parse time.
+- [ ] **Manifest `runtime_max = "0.15"`** observed — newer binaries emit `ManifestError::SoftwareKekNotPermitted` at parse time.
 - [ ] **`arkhe_runtime_software_kek_alpha_mode=1` metric** permanently visible on the dashboard — if someone turns it off, that's the signal that Tier-0 → Tier-1 promotion is required.
 - [ ] **Tier-0 retention window** — cap the pre-production duration (recommended: ≤ 30 days, then Tier-1 promote or re-evaluate).
 - [ ] **Ed25519 signing keys** stay on HW keys (YubiKey / NitroKey) even under Tier-0 — `software-kek` only covers the DEK KEK, never signing keys.

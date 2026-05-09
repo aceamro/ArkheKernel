@@ -71,10 +71,8 @@ layer or a malicious operator).
 ## SOCIAL-CONTRACT residual — S1
 
 `Clock::now()` monotonicity is documented as a social contract in
-[Domain Spec §4](domain-spec.md). Current mitigation: emit
-`KernelEvent::ClockAnomaly { previous_tick, observed_tick }` and preserve forward progress
-with `max(observed, previous)`. A future typestate `impl Monotonic<Tick>` promotes this
-residual away.
+[Domain Spec §4](domain-spec.md). The kernel preserves forward progress with
+`max(observed, previous)` so a regressing clock cannot rewind logical time.
 
 This is the **only** SOCIAL-CONTRACT residual. Every other A11 member is MACHINE-CHECKED via
 R4-H sealed-derive + R4-T `#[kernel_pure]` dylint.
@@ -93,7 +91,7 @@ Subtotal: **25** (24 axioms + 1 social residual).
 
 | Cross-cutting | Count | Members |
 | --- | --: | --- |
-| Machine-checked CI gates (separate from axioms) | **6** | R4-H sealed-derive proc-macro, R4-T `#[kernel_pure]` dylint, R4-W single-callsite lint, R4-X layer-DAG check, R3-H postcard-canonicality round-trip, R3-L `clippy::wildcard_enum_match_arm = deny` |
+| Machine-checked CI gates (separate from axioms) | **6** | R4-H sealed-derive proc-macro, R4-T `#[kernel_pure]` dylint, R4-W single-callsite lint, R4-X layer-DAG check, postcard-canonicality round-trip, `clippy::wildcard_enum_match_arm = deny` |
 | External dependency (subset of MACHINE-CHECKED) | **2** | A17 postcard library (canonicalization correctness), A14 fsync OS semantics (durability) |
 
 Growth in adversary capability erodes the lower three tiers (TYPE-ADJACENT,

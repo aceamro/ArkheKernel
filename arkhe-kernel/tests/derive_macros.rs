@@ -3,8 +3,8 @@
 //! through the same `::arkhe_kernel::...` paths an external
 //! domain crate would use.
 //!
-//! `ArkheAction` is already exercised via `domains/{hello,dice}` so
-//! this file focuses on the two new derives.
+//! `ArkheAction` is already exercised via the `examples/dice` integration
+//! example, so this file focuses on the two new derives.
 //!
 //! Byte-identity witnesses (`component_canonical_bytes_pinned`,
 //! `event_canonical_bytes_pinned`) ASSUME postcard wire format stability

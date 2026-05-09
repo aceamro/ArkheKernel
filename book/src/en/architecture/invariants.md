@@ -10,7 +10,7 @@ documentation and convention.
 
 | ID | Axiom | Tier |
 | --- | --- | --- |
-| **A1** | Identical config + postcard-canonical input sequence + `ModuleManifest::schema_hash` ⇒ all serialized bytes (WAL records + BLAKE3 chain, snapshot, event_log) are bit-identical | MACHINE-CHECKED |
+| **A1** | Identical config + postcard-canonical input sequence + `ModuleManifest::schema_hash` ⇒ all serialized bytes (WAL records + BLAKE3 chain, snapshot) are bit-identical | MACHINE-CHECKED |
 | **A2** | The Kernel is single-threaded. `Kernel: !Sync` (`PhantomData<Rc<()>>`) | TYPE-PROVEN |
 | **A3** | Instance independence. Effect reuse across instances is a compile error (A19 GhostCell brand) | TYPE-PROVEN |
 | **A4** | `#![forbid(unsafe_code)]` across the entire crate | MACHINE-CHECKED |
@@ -50,7 +50,7 @@ documentation and convention.
 | --- | --- | --- |
 | **A19** | `Effect<S, 'i>` brand: invariant lifetime (GhostCell pattern, Yanovski et al. ICFP 2021). Cross-instance reuse fails lifetime unification at compile time | TYPE-PROVEN |
 | **A20** | `StepStage` captures all ten commit-conditional writes (state_ops, events, schedule_deltas, id_counters, ledger_delta, inflight_refs_delta, wall_remainder_delta, local_tick_delta, pending_signals, observer_eviction_pending). `Instance` is mutated only through `apply_stage` | TYPE-ADJACENT |
-| **A21** | `InstanceConfig::quota_reduction_policy: { Reject, GrandfatherExisting, ThrottleProportional }`. The default is Reject. Each variant has a deterministic algorithm | TYPE-PROVEN |
+| **A21** | `InstanceConfig::quota_reduction: QuotaReductionPolicy { Reject, GrandfatherExisting, ThrottleProportional }`. The default is Reject. Each variant has a deterministic algorithm | TYPE-PROVEN |
 | **A22** | Observers are evicted on first panic. `ObserverEvicted { observer_index, panic_at_seq, panic_count_before_eviction: 1 }` is emitted. Re-registration requires the `OBSERVER_REGISTER` cap | RUNTIME-ASSERTED |
 | **A23** | Per-tick instance step order is ascending `InstanceId` (NonZeroU64 lex). `BTreeMap` iteration supplies this for free | TYPE-PROVEN |
 | **A24** | `AuthInputs` has private fields and a single constructor, the sealed `pub(crate) fn project()`. Canonical projection operates on `InstanceScope<'i>` + `StagedStateAtIndex` | TYPE-ADJACENT |
@@ -59,7 +59,7 @@ documentation and convention.
 
 | ID | Residual | Tier |
 | --- | --- | --- |
-| **S1** | `Clock::now()` monotonicity is documented in [Domain Spec](domain-spec.md). It is not type-enforced. A future extension reserves a typestate `impl Monotonic<Tick>` | SOCIAL-CONTRACT |
+| **S1** | `Clock::now()` monotonicity is documented in [Domain Spec](domain-spec.md). It is not type-enforced; the kernel preserves forward progress with `max(observed, previous)` | SOCIAL-CONTRACT |
 
 ## Counts by verification tier
 

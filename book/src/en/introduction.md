@@ -44,8 +44,7 @@ The full set of 24 axioms is documented in [Invariants](architecture/invariants.
 
 - **API docs (rustdoc)**: `cargo doc --open -p arkhe-kernel`
 - **GitHub**: [aceamro/ArkheKernel](https://github.com/aceamro/ArkheKernel)
-- **Example domains**: [`examples/dice/](https://github.com/aceamro/ArkheKernel/tree/main/examples/dice),
-  [`domains/dice/`](https://github.com/aceamro/ArkheKernel/tree/main/domains/dice)
+- **Example domain**: [`examples/dice/`](https://github.com/aceamro/ArkheKernel/tree/main/examples/dice)
 
 ## Stability
 
@@ -58,8 +57,7 @@ is the operating principle.
 This L0 kernel is **usable standalone**. You can define your own `Action`/`Component` types
 to build a custom domain.
 
-An optional upper layer — **ArkheForge Runtime** (L1+L2) — is under development and promises to
-absorb empirically-proven duplication. Runtime is a separate project, however; you are not required
-to adopt Runtime in order to use this kernel.
+An optional upper layer — the sibling **ArkheForge Runtime** (L1+L2) — covers shared runtime
+infrastructure. Runtime is a separate project; you are not required to adopt it to use this kernel.
 
 Next step: [Getting Started](getting-started.md) — build your first domain in a 5-minute tutorial.
