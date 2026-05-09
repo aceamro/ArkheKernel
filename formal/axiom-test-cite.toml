@@ -95,7 +95,7 @@ axioms = ["A11"]
 e_inheritance = ["E14 (subsumes E2)"]
 
 [layer_a_items.item_5]
-name = "ROADMAP v0.99+ Deferred"
+name = "ROADMAP Deferred extensions section"
 formal_anchor = false
 note = "documentation"
 

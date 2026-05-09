@@ -13,21 +13,26 @@ for subsequent work.
 | **ADMIN_UNLOAD cap path** | Done | `ADMIN_UNLOAD` cap path complete. `IntrospectHandle` grant-once API + ModuleManifest TypeCodePin deferred to future extensions |
 | **Persistence** | Done | `persist/`: WalHeader + BLAKE3 keyed chain (R4-F); WAL replay (`replay_into`); `KernelSnapshot` point-in-time blob (orthogonal to WAL); `SignatureClass { None, Ed25519 }` (Tier 1 + 2) |
 | **Determinism proof** | Done | The dice-domain demo reports `✓ A1 D1-Total verified` (WAL chain bit-identical) and passes the snapshot byte-identical determinism test |
+| **Formal verification** | Done | TLA+ refinement modules `cr1` / `cr2` / `cr3` / `cr4` + `r4_implementation_refinement` + `runtime_core` under `formal/tla-plus/`; axiom-cite inventory (`formal/axiom-test-cite.toml`) + Apalache typecheck CI gate |
 
 ## Deferred extensions
 
-Items **excluded** from v0.13. Each item retains a named promotion path.
+Items **excluded** from v0.13. Each item retains a named promotion path. Items
+whose initial implementation already landed in the sibling `ArkheForge` repo
+are noted in-place; the kernel-side surface that would activate them remains
+in the deferred set.
 
 - **R4-J Subset-Rust pure L1 checker** — statically blocks non-A11 APIs from domain crates;
   promotes `ActionCompute::compute()` purity from SOCIAL-CONTRACT (declaration) to MACHINE-CHECKED.
+  *(Subset-Rust checker landed in `ArkheForge/arkhe-subset-rust-check`.)*
 - **WASM sandbox option for L1** — alternative to Subset-Rust; instruction counter for runtime
   fairness; complementary to R4-J.
+  *(wasmtime-based runtime sandbox landed in `ArkheForge`.)*
 - **Per-step cycle-budget watchdog** — refuses further Op dispatch inside `step()` when the
   cycle count exceeds a per-instance ceiling. Runtime counterpart of the memory budget.
-- **TLA+ formal specs CR-1/2/3 + R4-I** — composed model checking of StepStage rollback,
-  cross-instance IPC re-auth, refcount oracle, and σᵢ₋₁ snapshot ordering.
 - **Implementation-level proofs (Kani / Creusot)** — beyond TLA+ specifications; machine-checked
   Rust property proofs for authorize, dispatch, and replay.
+  *(Kani harness suite landed in `ArkheForge/arkhe-runtime-proofs`. Creusot remains deferred.)*
 - **WAL streaming export** — incremental fsync as each record arrives (the current release is
   buffer-then-export).
 - **Snapshot + WAL hybrid replay** — start from a snapshot and apply tail WAL records.

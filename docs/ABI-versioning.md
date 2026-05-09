@@ -9,7 +9,7 @@ ArkheKernel has **two independent version coordinate systems**. They are intenti
 - **Location**: release marker across the repo. Each crate's `Cargo.toml` `[package] version` (`0.13.0`), git tag (`v0.13`), `CHANGELOG.md` entry.
 - **Audience**: project users — "which release am I using at this point in time".
 - **Bump condition**: when there is a public change and the team-lead declares a release.
-- **Policy**: asymptotic integer bump (0.13 → 0.14 → … → 0.99 → 0.100). 1.0 is intentionally never reached. This project aims for a single final release at v0.13, and even if fixes are later introduced, the same version is retained.
+- **Policy**: this project aims for a single final release at v0.13. Even if fixes are introduced later, the same version is retained. v1.0 is intentionally never reached.
 
 ### 2. L0 kernel ABI snapshot (`(0, 13)` / `(0, 13, 0)`)
 
