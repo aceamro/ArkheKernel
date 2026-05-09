@@ -23,8 +23,8 @@ arkhe-macros = { path = "../arkhe-macros", version = "0.13" }
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 # ML-DSA 65 (NIST FIPS 204, Dilithium-3) — PQC Hybrid mandate, default
 # dep (no feature gate). Hybrid signing path = Ed25519 + ML-DSA 65 dual-sign,
-# AND-mode verify. Software-only signer; HSM/KMS provider integration
-# deferred via PqcSigner / PqcVerifier trait abstraction.
+# AND-mode verify. Software-only signer; the PqcSigner / PqcVerifier
+# sealed-trait pair provides the HSM/KMS extension seam.
 ml-dsa = "=0.1.0-rc.9"
 
 [dev-dependencies]

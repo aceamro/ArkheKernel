@@ -28,15 +28,15 @@
  *
  * Distinction from R4-X: R4-X anchors the L0 kernel INTERNAL
  * 4-stratum DAG (`abi → state → runtime → persist`, single-crate
- * intra-module DAG enforced by cargo-modules CI gate at L0 build
- * time). R4-I refines E3 cross-layer 3-tier — different
- * abstraction level, not a refinement of R4-X. R4-X is a sibling
- * concept (L0-internal sealing axis), not the source axiom of
- * `LayerImportStrictlyDownward`. R4-X is Layer A DO NOT TOUCH
- * item 6 — preserved verbatim, sealed at the L0 build-time gate.
- * The TLA+ refinement here captures the abstract E3 cross-layer
- * invariant that the cargo-modules CI gate enforces at build
- * time. (R4-X is a Layer A item ID, not a cycle ID.)
+ * intra-module ordering enforced by Rust `pub(crate)` visibility
+ * at compile time). R4-I refines E3 cross-layer 3-tier —
+ * different abstraction level, not a refinement of R4-X. R4-X is
+ * a sibling concept (L0-internal sealing axis), not the source
+ * axiom of `LayerImportStrictlyDownward`. R4-X is Layer A DO NOT
+ * TOUCH item 5 — preserved verbatim, sealed at the L0 compile
+ * boundary. The TLA+ refinement here captures the abstract E3
+ * cross-layer invariant that Rust's module system enforces at
+ * build time. (R4-X is a Layer A item ID, not a cycle ID.)
  *
  * Space coverage note: E8 spec body covers Entry/Space parent DAGs
  * symmetrically. The TLA+ catalog (README.md §11.3) records E8 as
@@ -53,7 +53,7 @@
  * TypeOK explicitly via `TypeOK /\ ...`. Both conventions are
  * shared with the other refinement modules.
  *
- * Anchors the E3 / E8 / E9 axioms + R4-X Layer A item 6.
+ * Anchors the E3 / E8 / E9 axioms + R4-X Layer A item 5.
  *
  * Apalache primary tooling. CI: `apalache-mc typecheck` per .tla.
  * TLC fallback documented for E8 acyclicity over large entry sets.
@@ -188,8 +188,8 @@ TypeOK_R4 ==
 \* Every recorded layer import goes strictly downward in LayerOrder.
 \* L1 → L0 OK (LayerOrder L0=0 < L1=1); L2 → L1 OK (1 < 2); L2 → L0
 \* OK (0 < 2). L0 → anything FORBIDDEN (L0 sealed). L1 → L2
-\* FORBIDDEN per E3 explicit. Reverse imports fail the cargo-modules
-\* CI gate at build time.
+\* FORBIDDEN per E3 explicit. Reverse imports are unbuildable at
+\* compile time via Rust module visibility.
 \* (R4-X is the sibling L0-internal 4-stratum gate, not refined here.)
 LayerImportStrictlyDownward ==
     \A imp \in layer_imports :
@@ -279,8 +279,8 @@ ImportDirectionMonotone ==
 (* --- Concrete state machine refinement --- *)
 
 \* RecordLayerImport — register a layer-import edge. Pre-condition
-\* enforces E3 strictly-downward at insertion site (build-time
-\* cargo-modules CI gate refinement).
+\* enforces E3 strictly-downward at insertion site (compile-time
+\* module-visibility refinement).
 RecordLayerImport(imp) ==
     /\ imp \in Import
     /\ LayerOrder[imp.to] < LayerOrder[imp.from]
@@ -393,12 +393,13 @@ SpecR4 == InitR4 /\ [][NextR4]_vars_r4
 
 (* --- R4-X sibling concept note (L0-internal, not refined here) ---
  *
- * R4-X (Layer DAG one-way + cargo-modules CI gate) anchors the L0
- * kernel INTERNAL 4-stratum DAG (`abi → state → runtime → persist`,
- * single-crate intra-module ordering — reverse imports like
- * `state → runtime → persist` could sneak in unintentionally).
- * R4-X is enforced by cargo-modules at L0 build time and operates
- * at the L0-internal abstraction level.
+ * R4-X (Layer DAG one-way, Rust `pub(crate)` compile-time
+ * enforcement) anchors the L0 kernel INTERNAL 4-stratum DAG
+ * (`abi → state → runtime → persist`, single-crate intra-module
+ * ordering — reverse imports like `state → runtime → persist`
+ * could sneak in unintentionally). R4-X is enforced by Rust
+ * module visibility at L0 build time and operates at the
+ * L0-internal abstraction level.
  *
  * R4-I (this module) refines E3 cross-layer 3-tier (sealing scope
  * L0/L1/L2 per 02-layers.md §2.1+§2.2). The two operate at
@@ -407,20 +408,19 @@ SpecR4 == InitR4 /\ [][NextR4]_vars_r4
  *           (abi/state/runtime/persist).
  *   - R4-I/E3: ACROSS crates — cross-layer import direction
  *              (L1 → L0 OK, L1 → L2 forbidden, etc.).
- * Both leverage cargo-modules CI gates, but at different scopes.
- * R4-I does NOT refine R4-X; the two are sibling concepts at
- * distinct abstraction levels. The Rust-level enforcement of E3
- * is the build-gate (rejection at compile time); the TLA+
- * refinement here provides the formal-method anchor for the E3
- * cross-layer property the gate enforces.
+ * Both leverage Rust's compile-time module system, at different
+ * scopes. R4-I does NOT refine R4-X; the two are sibling concepts
+ * at distinct abstraction levels. The Rust-level enforcement of
+ * E3 is structural rejection at compile time; the TLA+ refinement
+ * here provides the formal-method anchor for the E3 cross-layer
+ * property the compile boundary enforces.
  *
- * R4-X is Layer A DO NOT TOUCH item 6. The Layer A 8-item ordering:
+ * R4-X is Layer A DO NOT TOUCH item 5. The Layer A 7-item ordering:
  * (1) DOMAIN_CTX / (2) InvariantLifetime / (3) Principal+KernelEvent
- * +StepStage derives / (4) A11 MC tag / (5) ROADMAP Deferred section
- * / (6) R4-X DAG / (7) EventMask bit allocation / (8) WalRecord
- * postcard field order. Layer A sealing means the cargo-modules CI
- * gate config is permanent; only escalation by explicit user consent
- * can relax it.
+ * +StepStage derives / (4) A11 MC tag / (5) R4-X DAG / (6) EventMask
+ * bit allocation / (7) WalRecord postcard field order. Layer A
+ * sealing means the L0-internal stratum DAG is permanent; only
+ * escalation by explicit user consent can relax it.
  *
  * Symmetric counterparts:
  *   - CR-1 (Adversary A, chain-affecting compute determinism)

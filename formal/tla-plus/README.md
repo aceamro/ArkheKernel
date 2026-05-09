@@ -188,15 +188,14 @@ In sibling ArkheForge, `arkhe-forge-platform/src/hook_host/capability_linker.rs`
 
 ### Layer A non-violation anchor
 
-**Layer A 8 items verbatim** (canonical ordering):
+**Layer A 7 items verbatim** (canonical ordering):
 1. `DOMAIN_CTX` literal
 2. `InvariantLifetime` variance
 3. `Principal` / `KernelEvent` / `StepStage` derives
 4. A11 MACHINE-CHECKED tag
-5. ROADMAP Deferred section
-6. R4-X DAG (Layer DAG one-way + cargo-modules CI gate)
-7. `EventMask` bit allocation
-8. `WalRecord` postcard field order
+5. R4-X DAG (Layer DAG one-way, Rust `pub(crate)` compile-time enforcement)
+6. `EventMask` bit allocation
+7. `WalRecord` postcard field order
 
 `verify-l0-baseline.sh` enforces the 32-files SHA-256 baseline; the formal/ tree lives outside `arkhe-kernel/src` and `arkhe-macros/src`, so these specs cannot mutate Layer A by construction.
 

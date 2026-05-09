@@ -1,6 +1,6 @@
 # L0 Baseline Hashes — arkhe-kernel/src/**/*.rs + arkhe-macros/src/**/*.rs
 #
-# L0 DO NOT TOUCH 8-item protection — CI gate baseline for the L0
+# L0 DO NOT TOUCH 7-item protection — CI gate baseline for the L0
 # modification prohibition directive. When a PR includes L0 file changes
 # against this baseline, the "L0 DIP companion declaration obligation"
 # CI warning fires.

@@ -28,7 +28,7 @@ description = "Cryptographic refinement primitive anchors (CR-N class siblings)"
 [cr_anchors.cr_c2]
 description = "Signature verification primitive class (Ed25519 + Hybrid AND-mode dispatch)"
 location = "arkhe-kernel/src/persist/signature.rs::VerifierClass::verify + verify_hybrid"
-sibling = "CR-1 (ChainHashFn, item 8)"
+sibling = "CR-1 (ChainHashFn, item 7)"
 axioms_indirect = ["A1", "A16"]
 e_inheritance_indirect = ["E12", "E14"]
 hybrid_extension = "Hybrid variant + dual-sign AND-mode verify path (Ed25519 + MlDsa65 both must pass)"
@@ -45,7 +45,7 @@ note = "no axiom anchor; sealed-trait safeguard + private module bound = securit
 # E1 — Core 5 primitive set (definitional foundation)
 # ============================================================
 # ============================================================
-# Layer A — Kernel byte-identity catastrophic invariants (8 items)
+# Layer A — Kernel byte-identity catastrophic invariants (7 items)
 # Single source of truth for L0 immutable byte-level anchors.
 # ============================================================
 
@@ -92,30 +92,25 @@ axioms = ["A11"]
 e_inheritance = ["E14 (subsumes E2)"]
 
 [layer_a_items.item_5]
-name = "ROADMAP Deferred extensions section"
-formal_anchor = false
-note = "documentation"
-
-[layer_a_items.item_6]
 name = "R4-X DAG"
 formal_anchor = true
 scope = "L0-internal 4-stratum (abi/state/runtime/persist)"
 sibling_to = "E3 cross-layer 3-tier"
 e_inheritance = []
 
-[layer_a_items.item_7]
+[layer_a_items.item_6]
 name = "EventMask bit allocation"
 formal_anchor = false
 note = "implementation bit allocation"
 
-[layer_a_items.item_8]
+[layer_a_items.item_7]
 name = "WalRecord postcard field order"
 formal_anchor = true
 axioms = ["A1"]
 e_inheritance = ["E14"]
 cite_anchor = "CR-1 ChainHashFn (BLAKE3 keyed_hash over postcard-encoded WalRecord) + wal_record_postcard_field_order_baseline (arkhe-kernel/src/persist/wal.rs::tests)"
 
-[layer_a_items.item_8.escalation_event]
+[layer_a_items.item_7.escalation_event]
 date = "2026-05-02"
 commit_hash = "e63e542"
 consent = "user-cited verbatim consent"
@@ -125,7 +120,7 @@ invariant_preserved = "WalRecordBody chain hash input bytes IDENTICAL pre/post P
 verify_chain = "byte-level wire format diff + cr1 + cr3 comment block update + axiom-cite gate + apalache typecheck PASS"
 spec_anchor = "L0 chain-input invariance preserved across the PQC envelope addition (chain-input bytes unchanged, additive wire-format slots only)"
 
-[layer_a_items.item_8.dual_layer_protection]
+[layer_a_items.item_7.dual_layer_protection]
 sub_a_invariant = "WalRecordBody (10-field chain hash input) — escalation pathway NEVER applied. ChainHashFn upstream determinism. A1 + E14 anchored."
 sub_b_relaxed = "WalRecord wire format (12->13 fields) — RELAXED monotone append-only across PQC introduction. Hybrid PQC signatures (signature_pqc=Some) are append-only; rollback 0."
 
@@ -280,7 +275,7 @@ impl_paths = [
     "arkhe-kernel/src/runtime/kernel.rs",
     "arkhe-kernel/src/lib.rs",
 ]
-note = "Hybrid AND-mode dispatch (Ed25519 + ML-DSA 65 both must pass), no-downgrade tests, and PqcSigner/PqcVerifier sealed-trait witnesses are kernel-side. Byte-shape pinning (3309/1952) is the NoPqcDowngradeAttack anchor at the wire layer. Wire-format byte-pinning attack-vector anchors (truncated header / zeroed PQC slot / wrong-size record) hosted under E14_L2_Allow as Layer A item 8 — wal_record_hybrid_layout_byte_identity + wal_header_verifying_key_pqc_slot_pinned (cross-axiom placement, structural prerequisite for E13 semantic INVs)."
+note = "Hybrid AND-mode dispatch (Ed25519 + ML-DSA 65 both must pass), no-downgrade tests, and PqcSigner/PqcVerifier sealed-trait witnesses are kernel-side. Byte-shape pinning (3309/1952) is the NoPqcDowngradeAttack anchor at the wire layer. Wire-format byte-pinning attack-vector anchors (truncated header / zeroed PQC slot / wrong-size record) hosted under E14_L2_Allow as Layer A item 7 — wal_record_hybrid_layout_byte_identity + wal_header_verifying_key_pqc_slot_pinned (cross-axiom placement, structural prerequisite for E13 semantic INVs)."
 
 # E13 specification ↔ implementation alignment notes — explicit so external readers
 # can see where the abstract model and the materialized impl diverge by design and
@@ -330,7 +325,7 @@ impl_tests = [
     "different_world_id_produces_different_chain",
     "chain_hash_unchanged_for_ed25519_records",
     "signature_deterministic_across_runs",
-    # WAL byte-format pinning (Layer A item 8 — A1+E14 upstream)
+    # WAL byte-format pinning (Layer A item 7 — A1+E14 upstream)
     "wal_record_postcard_layout_byte_identity",
     "wal_record_hybrid_layout_byte_identity",
     "wal_header_verifying_key_pqc_slot_pinned",

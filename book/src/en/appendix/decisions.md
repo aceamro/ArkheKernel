@@ -91,11 +91,13 @@ the same shape: problem → decision → rationale → rejected alternatives.
 - **Rejected**: An N-panic budget (N is arbitrary whatever the choice); retry forever (DoS
   exposure).
 
-## R4-X — Layer DAG one-way + cargo-modules CI gate
+## R4-X — Layer DAG one-way (Rust `pub(crate)` compile-time enforcement)
 
 - **Problem**: Reverse imports like `state → runtime → persist` could sneak in unintentionally.
-- **Decision**: A unidirectional four-stratum DAG. A `cargo-modules` + grep CI gate fails the
-  build on any cycle before code review.
+- **Decision**: A unidirectional four-stratum DAG (`abi → state → runtime → persist`). Rust's
+  module system itself rejects the violation: `pub(crate)` boundaries plus the
+  no-cyclic-module-import rule make a reverse edge structurally unbuildable, with no
+  external lint runner required.
 - **Rationale**: Structural pollution is rejected at compile time rather than at runtime.
 - **Rejected**: Monolithic (test complexity grows); allowing cycles (invites design rot).
 

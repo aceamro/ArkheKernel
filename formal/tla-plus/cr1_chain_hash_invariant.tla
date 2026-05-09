@@ -7,7 +7,7 @@
  *  (1) concrete refinement of `chain_tip` from opaque string to a
  *      bytes-sequence (opaque-in-base + refine-here pattern);
  *  (2) `WalRecord` concrete record type for `wal` sequence (postcard
- *      field order sealed at L0 DO NOT TOUCH item 8);
+ *      field order sealed at L0 DO NOT TOUCH item 7);
  *  (3) `ChainHashDeterministic` invariant — E14 => A1 anchor;
  *  (4) `ComputePurityHonored` invariant — E14.L1-Deny build-time
  *      dylint + L2-Allow runtime sandbox dual realisation;
@@ -36,7 +36,7 @@ CONSTANTS
                            \* (10-field chain hash input subset of
                            \* WalRecord, INVARIANT across PQC envelope
                            \* extensions). `arkhe-kernel/src/persist/
-                           \* wal.rs` Layer A item 8 dual-layer
+                           \* wal.rs` Layer A item 7 dual-layer
                            \* protection: (a) WalRecordBody field order
                            \* never escalates; (b) WalRecord wire format
                            \* relaxed monotone append-only.
@@ -53,7 +53,7 @@ ASSUME
 \* chain hash. The concrete implementation lives in
 \* `arkhe-kernel/src/persist/wal.rs`. Chain hash input subset =
 \* WalRecordBody 10-field order, INVARIANT across PQC envelope
-\* extensions (Layer A item 8 dual-layer: WalRecordBody never
+\* extensions (Layer A item 7 dual-layer: WalRecordBody never
 \* escalates; WalRecord wire format relaxed monotone append-only).
 \* TLA+ `payload: Seq(0..255)` abstraction covers any concrete byte
 \* layout.

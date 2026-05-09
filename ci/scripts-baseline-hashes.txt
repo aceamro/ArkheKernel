@@ -13,4 +13,4 @@
 #          (replace this file's hash entry with the output line, preserve header block).
 #
 8088a828c9ce5326ed069c76a9502ded1cebcbbc125f0a9313147da2da1e6d94  scripts/verify-axiom-cite.sh
-416d1198de6625ade57d1d398e48daab702718807b23277c207295c45bf43e2f  scripts/verify-l0-baseline.sh
+39f18f5d251a742ff808bb97c4479dd9cc7398ba893208e0b2ca31b29f11f798  scripts/verify-l0-baseline.sh

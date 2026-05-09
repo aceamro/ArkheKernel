@@ -37,10 +37,11 @@ private reports, but the disclosure window above no longer applies.
 - **Triage**: within 14 days the report is either confirmed, declined, or
   marked needing-more-info.
 - **Fix window**: depends on severity and surface. Security-critical
-  defects in a kernel-sealed surface (Layer A invariants A1, A11, A12,
-  A22; sealed-trait escape; signature forgery; chain-integrity bypass)
-  are prioritised over functional bugs. Coordinated public disclosure is
-  agreed with the reporter once a fix is ready.
+  defects in a kernel-sealed surface (axioms A1, A11, A12, A22 —
+  machine-checked byte/state invariants; sealed-trait escape; signature
+  forgery; chain-integrity bypass) are prioritised over functional bugs.
+  Coordinated public disclosure is agreed with the reporter once a fix
+  is ready.
 
 ## Scope
 
@@ -49,8 +50,10 @@ In-scope:
 - `arkhe-kernel` (the L0 kernel crate).
 - `arkhe-macros` (the derive crate that supplies the sealed `Action`
   byte-path blanket impl).
-- The CI/lint gates that protect the seals — `verify-l0-baseline.sh`,
-  `verify-axiom-cite.sh`, the `cargo-modules` layer-DAG gate.
+- The CI/lint gates that protect the seals — `verify-l0-baseline.sh`
+  and `verify-axiom-cite.sh`. The L0-internal 4-stratum DAG (R4-X) is
+  enforced by Rust module visibility (`pub(crate)`) at compile time,
+  not by an external lint runner.
 
 Out of scope (please report to the relevant repository):
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# verify-l0-baseline.sh — L0 DO NOT TOUCH 8-item protection.
+# verify-l0-baseline.sh — L0 DO NOT TOUCH 7-item protection.
 #
 # Compares current working-tree SHA-256 against `ci/l0-baseline-hashes.txt`.
 # On mismatch, fails with "L0 modification detected — L0-specific DIP required".
@@ -36,4 +36,4 @@ MSG
   exit 1
 fi
 
-echo "L0 baseline OK — DO NOT TOUCH 8 items unchanged."
+echo "L0 baseline OK — DO NOT TOUCH 7 items unchanged."
