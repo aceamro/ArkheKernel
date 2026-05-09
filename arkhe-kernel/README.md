@@ -217,9 +217,7 @@ reproduce on their own hardware to verify.
 
 v0.13 — single fixed pre-public version. No version churn before
 external publish; subsequent corrections land on the same v0.13 line.
-Version 1.0 is intentionally never reached. See
-[`docs/spec-drift-candidates.md`](docs/spec-drift-candidates.md) for
-the post-publish reconciliation backlog.
+Version 1.0 is intentionally never reached.
 
 ## Documentation
 

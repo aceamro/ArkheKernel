@@ -8,7 +8,7 @@
 # Anchored to:
 #   - the E1-E15 Runtime axiom set
 #   - formal/tla-plus/{runtime_core,cr1,cr2,cr3,cr4,r4}.tla (TLA+ refinement)
-#   - arkhe-runtime-proofs/src/lib.rs (Kani 4-property suite)
+#   - sibling ArkheForge: arkhe-runtime-proofs/src/lib.rs (Kani 4-property suite)
 
 [meta]
 schema_version = 1
@@ -415,8 +415,8 @@ note = "type-system level, no TLA+ INV; impl test e10_arkhe_uri_typecode_registr
 # Skipped by verify-axiom-cite.sh iteration (informational only).
 # ============================================================
 [kani_5_property]
-description = "Implementation-level proof suite (TLA+ refinement complement) — lives in sister repo arkhe-runtime-proofs/src/lib.rs"
-location = "../ArkheForge/arkhe-runtime-proofs/src/lib.rs (sister repo)"
+description = "Implementation-level proof suite (TLA+ refinement complement) — lives in sibling ArkheForge: arkhe-runtime-proofs/src/lib.rs"
+location = "sibling ArkheForge: arkhe-runtime-proofs/src/lib.rs"
 
 [kani_5_property.kani_authorize_property]
 axiom = "E6 + E7 typestate"

@@ -43,11 +43,11 @@ kernel's privacy boundary, so any caller wishing to feed inputs into the
 authorize/dispatch path must traverse the sealed constructor. External
 forgery of `AuthInputs` is type-syntactically impossible.
 
-### SealedCapToken (L1+ runtime, `arkhe-forge-platform`)
+### SealedCapToken (L1+ runtime, sibling ArkheForge: `arkhe-forge-platform`)
 
 **E15.b cap_token confinement strengthening.**
 
-`arkhe-forge-platform/src/wasm_runtime_common/mod.rs:262-329` declares:
+In sibling ArkheForge, `arkhe-forge-platform/src/wasm_runtime_common/mod.rs:262-329` declares:
 
 - `mod private_seal { pub trait Sealed {} }` (single private marker shared
   across cap-token and host-import bounds)
@@ -66,11 +66,11 @@ Witness tests at `mod.rs:813,822` (`hook_cap_token_satisfies_sealed_bound`,
 concrete cap-token types satisfy the sealed bound; trait-bound regression
 would fail typeck.
 
-### SealedHostImport (L1+ runtime, `arkhe-forge-platform`)
+### SealedHostImport (L1+ runtime, sibling ArkheForge: `arkhe-forge-platform`)
 
 **E14.L2-Allow rule 3 host-import allow-list strengthening.**
 
-`arkhe-forge-platform/src/wasm_runtime_common/mod.rs:361-394` declares:
+In sibling ArkheForge, `arkhe-forge-platform/src/wasm_runtime_common/mod.rs:361-394` declares:
 
 - `mod private_seal { pub trait Sealed {} }` (same private marker as the
   cap-token bound — single source of seal authority)

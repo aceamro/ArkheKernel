@@ -33,7 +33,7 @@ is the CI grep gate that enforces it.
 |---|---|---|---|---|---|
 | **E1** | Runtime primitive set = {User, Actor, Space, Entry, Activity} | MC | `CONSTANTS PrimitiveSet` (definitional) | (foundation) | `axioms_e_series.rs:72` |
 | **E2** | `Action::compute` pure (A11 inheritance) | MC | subsumed by E14 `ChainHashDeterministic` | CR-1 | `axioms_e_series.rs:85,261` |
-| **E3** | Runtime → L0 strictly downward, L1 → L2 forbidden | MC | `LayerImportStrictlyDownward` + `ImportDirectionMonotone` (L1+ runtime sub-DAG boundary→runtime; formal companion to the CI grep gate) | R4-I | `axioms_e_series.rs:107` + `arkhe-forge-platform/src/wasm_runtime_common/mod.rs` |
+| **E3** | Runtime → L0 strictly downward, L1 → L2 forbidden | MC | `LayerImportStrictlyDownward` + `ImportDirectionMonotone` (L1+ runtime sub-DAG boundary→runtime; formal companion to the CI grep gate) | R4-I | `axioms_e_series.rs:107` + sibling ArkheForge: `arkhe-forge-platform/src/wasm_runtime_common/mod.rs` |
 | **E4** | `UserId` globally unique / `ActorId` shell-unique | TP | `UserIdGloballyUnique` + `ActorIdShellUnique` | CR-2 | `axioms_e_series.rs:122` |
 | **E5** | `Actor.user_id` + `shell_id` immutable post-creation | MC | `ActorIdentityImmutable` | CR-2 | `axioms_e_series.rs:133` |
 | **E6** | `Actor<_, Authenticated>` requires `UserBinding` (typestate) | TP | `AuthenticatedActorHasUserBinding` | CR-2 | `axioms_e_series.rs:145` + Kani `kani_authorize_property` |
@@ -124,9 +124,9 @@ sealing cut.
   `arkhe-macros/src/**`. `verify-l0-baseline.sh` enforces the 31-files
   SHA-256 baseline.
 - **Path placement**: `formal/tla-plus/` is workspace-root sibling to
-  `arkhe-kernel/`, NOT inside L0 source tree. `arkhe-runtime-proofs/`
-  (Kani harnesses) follows the same workspace-root parallel convention
-  and is excluded from `[workspace] members`.
+  `arkhe-kernel/`, NOT inside L0 source tree. The companion Kani
+  harness suite (`arkhe-runtime-proofs/`) lives in sibling ArkheForge
+  under the same workspace-root parallel convention.
 - **Module-tool annotation**: Apalache primary across all 5 modules.
   CR-3 + R4-I have TLC fallback documented when Apalache SMT bounded
   trace > 8 ticks times out.
@@ -146,7 +146,7 @@ sealing cut.
 
 ### Kani 4-property suite ↔ axiom mapping
 
-`arkhe-runtime-proofs/src/lib.rs`:
+In sibling ArkheForge, `arkhe-runtime-proofs/src/lib.rs`:
 
 | Kani property | Axiom anchor | Tier | Verification target |
 |---|---|---|---|
@@ -177,7 +177,7 @@ sealing cut.
 
 ### Linker hook-fn 1:1 mapping
 
-`arkhe-forge-platform/src/hook_host/capability_linker.rs` enumerates 4 host-fns under `arkhe:hook/*` namespace (cited at lines 22-26 of that file):
+In sibling ArkheForge, `arkhe-forge-platform/src/hook_host/capability_linker.rs` enumerates 4 host-fns under `arkhe:hook/*` namespace (cited at lines 22-26 of that file):
 - `arkhe:hook/state.read` ↔ TLA+ `"hook.state.read"` (CR-1 `HostImports`)
 - `arkhe:hook/state.write` ↔ TLA+ `"hook.state.write"` (CR-1 `HostImports`)
 - `arkhe:hook/emit.extra_bytes` ↔ TLA+ `"hook.emit.extra_bytes"` (CR-1 `HostImports`)

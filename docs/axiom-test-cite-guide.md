@@ -13,7 +13,8 @@ three independent enforcement layers:
 1. **TLA+ refinement** — formal proof of the abstract invariant
    (`formal/tla-plus/<module>.tla`).
 2. **Rust impl test** — concrete check at the implementation level
-   (`arkhe-forge-core/tests/axioms_e_series.rs` and domain-specific test files).
+   (in sibling ArkheForge: `arkhe-forge-core/tests/axioms_e_series.rs` and
+   domain-specific test files).
 3. **Inventory cite** — machine-readable mapping that links the abstract proof to
    the concrete check (`formal/axiom-test-cite.toml`).
 
@@ -49,12 +50,12 @@ CR-4 modules, add a new module (`crX_*.tla`) and update the README.md mapping
 table at `formal/tla-plus/README.md`.
 
 **Step 3 — Rust impl test**. Add a test that exercises the runtime contract. Place
-it in `arkhe-forge-core/tests/axioms_e_series.rs` for E-series axioms, or in the
-domain-specific test file when the axiom is realised in another crate (e.g.,
-`arkhe-subset-rust-check` for E14.L1 deny-list, `arkhe-forge-platform/src/
-hook_host/capability_linker.rs` for E14.L2). Test names must be unique and
-greppable as `fn <name>` (one identifier per axiom slot, multiple tests allowed
-when an axiom has multiple invariants).
+it in sibling ArkheForge: `arkhe-forge-core/tests/axioms_e_series.rs` for E-series
+axioms, or in the domain-specific test file when the axiom is realised in another
+crate (e.g., `arkhe-subset-rust-check` for E14.L1 deny-list,
+`arkhe-forge-platform/src/hook_host/capability_linker.rs` for E14.L2). Test names
+must be unique and greppable as `fn <name>` (one identifier per axiom slot,
+multiple tests allowed when an axiom has multiple invariants).
 
 **Step 4 — inventory entry**. Add an `[E<N>]` section to
 `formal/axiom-test-cite.toml`. The minimum fields are:
@@ -218,6 +219,7 @@ confirm:
 
 ```bash
 grep -nE "\bMyInv\b" formal/tla-plus/cr3_replay_determinism.tla
+# in sibling ArkheForge:
 grep -nE "\bfn\s+my_test\b" arkhe-forge-core/tests/axioms_e_series.rs
 ```
 
@@ -247,5 +249,5 @@ see 1, fix it and run again to surface any further issues.
 - `.github/workflows/ci.yml` `lint` job — CI gate integration.
 - `formal/tla-plus/README.md` — TLA+ refinement narrative + E1-E15 ↔ INV table.
 - Runtime axiom set (E1-E15) — canonical narrative carried by the inventory + this guide.
-- `arkhe-forge-core/tests/axioms_e_series.rs` — E1-E13 impl tests.
-- `arkhe-runtime-proofs/src/lib.rs` — Kani 4-property suite.
+- Sibling ArkheForge: `arkhe-forge-core/tests/axioms_e_series.rs` — E1-E13 impl tests.
+- Sibling ArkheForge: `arkhe-runtime-proofs/src/lib.rs` — Kani 4-property suite.

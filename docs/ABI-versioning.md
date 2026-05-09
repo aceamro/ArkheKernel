@@ -65,7 +65,7 @@ L0 source modifications without this procedure are a violation of L0 DO NOT TOUC
 
 Beyond the ABI snapshot, the repo has two **hash-pinned wire invariants**. They require a spec drift correction even when the schema itself does not change, if reproducibility breaks.
 
-### Manifest canonical digest (`arkhe-forge-platform::manifest`)
+### Manifest canonical digest (sibling ArkheForge: `arkhe-forge-platform::manifest`)
 
 `canonical_digest = blake3::keyed_hash(derive_key("arkhe-forge-manifest-digest", &[]), toml::to_string(snapshot))`
 
@@ -74,7 +74,7 @@ Beyond the ABI snapshot, the repo has two **hash-pinned wire invariants**. They 
 - A future `toml` **major** version bump (e.g. `1.x → 2.x`) may rewrite the BTreeMap traversal / whitespace canonicalisation and therefore drift the digest.
 
 **Drift response procedure** (Option C):
-1. The regression test `arkhe-forge-platform/src/manifest.rs::digest_invariant::TIER0_DEV_DIGEST_V0_11` surfaces the drift on the first failing build.
+1. The regression test in sibling ArkheForge — `arkhe-forge-platform/src/manifest.rs::digest_invariant::TIER0_DEV_DIGEST_V0_11` — surfaces the drift on the first failing build.
 2. The operator updates the sentinel bytes to the new value.
 3. **Companion micro-patch in the canonical ABI policy notes** — the schema itself did not change, so manifest `schema_version` stays put; the patch records the toml-crate bump as the explicit contract change.
 4. Manifest `schema_version` is **not** bumped — Option C avoids the contract ambiguity of "schema_version bump without schema change".

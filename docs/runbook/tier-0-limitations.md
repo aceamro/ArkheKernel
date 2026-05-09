@@ -18,7 +18,7 @@ Tier-1+ moves the KEK into an HSM / KMS (FIPS 140-3 certified boundary), out of 
 
 ## 2. Limits of the Process Protection FFI
 
-`arkhe-forge-platform::process_protection` mitigates the exposure window with three syscalls but **does not eliminate it**.
+In sibling ArkheForge, `arkhe-forge-platform::process_protection` mitigates the exposure window with three syscalls but **does not eliminate it**.
 
 | Primitive | Linux | macOS | Windows | Effect |
 |---|---|---|---|---|
