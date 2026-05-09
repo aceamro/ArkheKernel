@@ -888,7 +888,7 @@ mod tests {
         );
     }
 
-    // ---- PQC envelope wire format (Layer A item 8 post-extension) ----
+    // ---- PQC envelope wire format (Layer A item 7 post-extension) ----
 
     #[test]
     fn wal_record_postcard_layout_byte_identity() {
@@ -994,7 +994,7 @@ mod tests {
 
     #[test]
     fn wal_record_postcard_field_order_baseline() {
-        // Layer A item 8 post-extension baseline pin. Pins the WalRecord
+        // Layer A item 7 post-extension baseline pin. Pins the WalRecord
         // postcard byte sequence for a Tier 1 (no signature) record with
         // distinctive inputs. Any silent reorder or addition of fields
         // breaks this BLAKE3 hash regression pin.
