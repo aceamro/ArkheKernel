@@ -2,9 +2,6 @@
 
 **Policy restatement**: Tier-0 is **dev / pre-production only**. Operating Tier-0 in any environment that serves real user data (subject to GDPR or equivalent) is **prohibited** — this is a compliance requirement, not a recommendation. Only Tier-1 (KMS free-tier) or above qualifies as a production path.
 
-Related documents:
-- `docs/release-keys.md` §3 — HW key two-person custody (Tier-1+).
-
 ---
 
 ## 1. Problem — Plaintext KEK in Process Memory
@@ -96,7 +93,7 @@ Operators must verify every item before each deploy. Each missed item drives the
 - [ ] **Manifest `runtime_max = "0.15"`** observed — v0.16+ binaries emit `ManifestError::SoftwareKekNotPermitted` at parse time.
 - [ ] **`arkhe_runtime_software_kek_alpha_mode=1` metric** permanently visible on the dashboard — if someone turns it off, that's the signal that Tier-0 → Tier-1 promotion is required.
 - [ ] **Tier-0 retention window** — cap the pre-production duration (recommended: ≤ 30 days, then Tier-1 promote or re-evaluate).
-- [ ] **Ed25519 signing keys** (`runtime-doctor-journal-v1` / `release-signing-v1`) stay on HW keys (YubiKey / NitroKey) even under Tier-0 — `software-kek` only covers the DEK KEK, never signing keys (release-keys §3).
+- [ ] **Ed25519 signing keys** stay on HW keys (YubiKey / NitroKey) even under Tier-0 — `software-kek` only covers the DEK KEK, never signing keys.
 
 ### 4.4 Network / access paths
 
@@ -130,7 +127,6 @@ Operators must verify every item before each deploy. Each missed item drives the
 
 ## 6. References
 
-- `docs/release-keys.md` §3 — HW key two-person custody policy.
 - Linux `mlockall(2)` / `prctl(2)` man pages.
 - FIPS 140-3 cryptographic module validation — Tier-1/2 foundation.
 

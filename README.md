@@ -227,7 +227,6 @@ Version 1.0 is intentionally never reached.
   local preview)
 - API reference: [docs.rs/arkhe-kernel](https://docs.rs/arkhe-kernel)
 - Operator runbook: [`docs/runbook/`](docs/runbook/)
-- Release keys + signing: [`docs/release-keys.md`](docs/release-keys.md)
 - Build reproducibility: [`docs/build-reproducibility.md`](docs/build-reproducibility.md)
 
 ## License

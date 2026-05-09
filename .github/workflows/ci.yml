@@ -290,7 +290,7 @@ jobs:
           # resolve its path-dep siblings from crates.io after the previous
           # actual publish. `--dry-run` here only assembles + validates the
           # `.crate`; the actual publish happens in a separate operator-gated
-          # workflow (see docs/release-keys.md §9).
+          # workflow.
           publish_order=(
             arkhe-macros
             arkhe-kernel

@@ -1,8 +1,8 @@
 # docs/
 
-Top-level documentation index for **ArkheKernel + ArkheForge Runtime**
-(L0 + L1 + L2). Specs build via mdBook; operational and planning documents
-live as flat Markdown here.
+Top-level documentation index for **ArkheKernel** (L0 kernel library).
+Specs build via mdBook; operational and planning documents live as flat
+Markdown here.
 
 ## Canonical specifications
 
@@ -29,7 +29,6 @@ Layer independence is one-way: L0 ← Runtime ← Shell. Shell repositories
 |----------|---------|
 | [`build-reproducibility.md`](build-reproducibility.md) | Same-machine Linux x86_64 reproducibility scope + procedure. |
 | [`ABI-versioning.md`](ABI-versioning.md) | Schema evolution + WAL ABI stability rules. |
-| [`release-keys.md`](release-keys.md) | Sigstore keyless cosign release-signing policy + verification commands. |
 
 ## Operator runbooks (`runbook/`)
 

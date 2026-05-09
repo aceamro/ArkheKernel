@@ -44,19 +44,19 @@
 # the five not covered by any imported audit set.
 
 [[audits.ed25519-dalek]]
-who      = "veteran <noreply@arkheforge.invalid>"
+who      = "veteran <noreply@arkhekernel.invalid>"
 version  = "2.2.0"
 criteria = "safe-to-deploy"
 notes    = """
-Core signing primitive on the spec §12.4 chain_tip_signature + §14.7
-SignatureClassPolicy + release-keys §3 path. Since v2.0 the crate
+Core signing primitive on the chain-tip signature + SignatureClassPolicy
+path. Since v2.0 the crate
 integrates `subtle` constant-time comparisons and `zeroize`. CVE-2022-46396
 (timing oracle) was closed in v2.0. RustSec advisory DB clean. Source
 review: panic-free, no unsafe in the hot path, no FFI.
 """
 
 [[audits.blake3]]
-who      = "veteran <noreply@arkheforge.invalid>"
+who      = "veteran <noreply@arkhekernel.invalid>"
 version  = "1.8.4"
 criteria = "safe-to-deploy"
 notes    = """
@@ -69,7 +69,7 @@ path; the fallback is fully safe Rust.
 """
 
 [[audits.aes-gcm]]
-who      = "veteran <noreply@arkheforge.invalid>"
+who      = "veteran <noreply@arkhekernel.invalid>"
 version  = "0.10.3"
 criteria = "safe-to-deploy"
 notes    = """
@@ -81,7 +81,7 @@ this crate; this audit covers the primitive only.
 """
 
 [[audits.chacha20poly1305]]
-who      = "veteran <noreply@arkheforge.invalid>"
+who      = "veteran <noreply@arkhekernel.invalid>"
 version  = "0.10.1"
 criteria = "safe-to-deploy"
 notes    = """
@@ -93,7 +93,7 @@ with the DEK rotation SLA. RustSec advisory clean. Constant-time +
 """
 
 [[audits.zeroize]]
-who      = "veteran <noreply@arkheforge.invalid>"
+who      = "veteran <noreply@arkhekernel.invalid>"
 version  = "1.8.2"
 criteria = "safe-to-deploy"
 notes    = """
@@ -107,7 +107,7 @@ elimination. The unsafe blocks are limited to the volatile write paths
 """
 
 [[audits.ml-dsa]]
-who      = "cryptographer <noreply@arkheforge.invalid>"
+who      = "cryptographer <noreply@arkhekernel.invalid>"
 version  = "0.1.0-rc.9"
 criteria = "safe-to-deploy"
 notes    = """

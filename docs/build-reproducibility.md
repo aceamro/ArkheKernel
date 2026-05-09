@@ -23,7 +23,7 @@ Reproducibility is guaranteed **only under the following conditions**.
 - Cross-architecture (x86_64 ≠ aarch64).
 - Reproducibility after LLVM / rustc major version upgrade.
 - Incremental compilation (`cargo build` without `--release` / dirty cache) — always destroys reproducibility.
-- Proc-macros outside crates.io — `arkhe-macros` / `arkhe-forge-macros` are deterministic, but determinism of external proc-macros is subject to separate audit.
+- Proc-macros outside crates.io — `arkhe-macros` is deterministic, but determinism of external proc-macros is subject to separate audit.
 
 ---
 
@@ -55,7 +55,7 @@ Ubuntu-only (`runs-on: ubuntu-latest`). Runs after the `test` job. Steps:
 2. `dtolnay/rust-toolchain@stable`.
 3. Run `./scripts/reproduce-build.sh`. Hash diff → exit 1 → CI red.
 
-On release tag (`refs/tags/v*`) push, the `release-sign` job attaches Sigstore keyless cosign signatures to the same binaries (see §9 of `docs/release-keys.md`).
+On release tag (`refs/tags/v*`) push, the `release-sign` job attaches Sigstore keyless cosign signatures to the same binaries.
 
 ---
 
@@ -68,7 +68,7 @@ Operators confirm on each release PR:
 - [ ] `Cargo.lock` committed + `--locked` used — dependency versions pinned.
 - [ ] No `build.rs` in the workspace — re-confirmed.
 - [ ] No parallel-build non-determinism — cargo release profile uses fixed codegen-units and is deterministic.
-- [ ] Proc-macro determinism — `arkhe-macros` / `arkhe-forge-macros` verified; external proc-macros governed by cargo-vet.
+- [ ] Proc-macro determinism — `arkhe-macros` verified; external proc-macros governed by cargo-vet.
 - [ ] Embedded resources (version / date) only via `SOURCE_DATE_EPOCH`.
 
 ---
@@ -89,7 +89,7 @@ Reproducibility is one component of supply chain security:
 
 1. `cargo-audit` + `cargo-deny` + `cargo-vet` (see `supply-chain/`) guarantee dep integrity.
 2. Reproducibility (this document) guarantees source-to-binary integrity.
-3. **Sigstore keyless cosign** — on release tag push, CI attaches OIDC-signed signatures to binaries + `cargo package` tarballs (see `docs/release-keys.md` §9).
+3. **Sigstore keyless cosign** — on release tag push, CI attaches OIDC-signed signatures to binaries + `cargo package` tarballs.
 
 ### Local audit
 
@@ -112,4 +112,3 @@ The same pattern applies to `cargo-audit` and `cargo-vet` (`cargo install --lock
 - SOURCE_DATE_EPOCH specification: https://reproducible-builds.org/specs/source-date-epoch/
 - `scripts/reproduce-build.sh` — execution script.
 - `.github/workflows/ci.yml` `reproducibility` + `release-sign` jobs.
-- `docs/release-keys.md` — Sigstore keyless signing policy.

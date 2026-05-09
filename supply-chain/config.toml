@@ -38,36 +38,7 @@ criteria = "safe-to-deploy"
 [policy.arkhe-macros]
 criteria = "safe-to-deploy"
 
-[policy.arkhe-forge-core]
-criteria = "safe-to-deploy"
-
-[policy.arkhe-forge-platform]
-criteria = "safe-to-deploy"
-
-[policy.arkhe-forge]
-criteria = "safe-to-deploy"
-
-# Note: `arkhe-shell-bbs` lives in a separate repo (split 2026-04-24).
-# That shell repo carries its own `supply-chain/config.toml`. We do not
-# leave an orphan policy entry here, so `cargo vet` does not see an
-# unknown policy.
-#
-# When a shell crate is added back to this workspace later (e.g.
-# `arkhe-shell-casino`, `arkhe-shell-forum`), add a matching
-# `[policy.<name>] criteria = "safe-to-deploy"` block.
-
-# Testkit + lint helpers are test-only.
-[policy.arkhe-runtime-testkit]
-criteria = "safe-to-run"
-
-[policy.arkhe-trait-default-check]
-criteria = "safe-to-run"
-
-[policy.arkhe-subset-rust-check]
-criteria = "safe-to-run"
-
 # Domain demo is test-only.
-
 [policy.dice-domain]
 criteria = "safe-to-run"
 

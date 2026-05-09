@@ -185,8 +185,7 @@ not for first-time users.
   not theorem soundness.
 - **Process discipline** — an 8-category cosmetic-vs-semantic commit
   denylist guards security-critical, formal-artifact, timing-side-
-  channel, and fuel-budget surfaces from drive-by edits. See
-  [`developteamset.md`](developteamset.md).
+  channel, and fuel-budget surfaces from drive-by edits.
 
 ## Performance
 
@@ -228,8 +227,6 @@ the post-publish reconciliation backlog.
   local preview)
 - API reference: [docs.rs/arkhe-kernel](https://docs.rs/arkhe-kernel)
 - Operator runbook: [`docs/runbook/`](docs/runbook/)
-- Implementation plan: [`docs/implementation-plan.md`](docs/implementation-plan.md)
-- Release keys + signing: [`docs/release-keys.md`](docs/release-keys.md)
 - Build reproducibility: [`docs/build-reproducibility.md`](docs/build-reproducibility.md)
 
 ## License

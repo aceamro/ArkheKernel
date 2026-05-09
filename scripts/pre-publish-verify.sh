@@ -21,8 +21,6 @@
 #
 # Usage:
 #   bash scripts/pre-publish-verify.sh
-#
-# Reference: docs/release-keys.md §10 (publish-gate obligation).
 
 set -euo pipefail
 
@@ -119,7 +117,7 @@ echo "================================================================"
 echo "[${GATE_TOTAL}/${GATE_TOTAL}] all gates green — cargo publish ALLOWED"
 echo "================================================================"
 echo
-echo "Next steps (per docs/release-keys.md §10):"
+echo "Next steps:"
 echo "  1. git tag -s v<version>"
 echo "  2. git push origin v<version>   # triggers CI release-sign job"
 echo "  3. cargo publish -p <crate>     # in dependency order"
