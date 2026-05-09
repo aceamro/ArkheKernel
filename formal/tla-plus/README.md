@@ -5,7 +5,7 @@ SMT-backed). **TLC** documented fallback for large-state explicit-state
 MC where Apalache's bounded search times out (CR-3 replay determinism
 over WAL records is the expected first call site).
 
-Anchored to `runtime-book/src/en/architecture/11-axioms.md` (E1-E15).
+Anchored to the E1-E15 Runtime axiom set.
 
 ## Modules
 
@@ -53,7 +53,7 @@ E2 is subsumed by E14 (compute purity is the input-level guarantee A1
 bit-identical replay requires). E10 is TYPE-ADJACENT — the 3-tuple
 shape is enforced at the Rust type level, no runtime invariant.
 
-**E13 PolicyMonotonic — sticky-Hybrid semantic.** `ShellPolicySnapshot(wal, shell_id)` returns `Hybrid` if any prior `SignatureClassPolicy` event with `declared_class = Hybrid` exists in `wal`, else `Ed25519Only`. `PolicyMonotonic_Derivable` is then a theorem from A14 WAL append-only, not a separate INV. The semantic is consistent with `runtime-book/src/en/architecture/11-axioms.md` E13 + `§14.7`, which describe the snapshot as sticky/latching.
+**E13 PolicyMonotonic — sticky-Hybrid semantic.** `ShellPolicySnapshot(wal, shell_id)` returns `Hybrid` if any prior `SignatureClassPolicy` event with `declared_class = Hybrid` exists in `wal`, else `Ed25519Only`. `PolicyMonotonic_Derivable` is then a theorem from A14 WAL append-only, not a separate INV. The E13 axiom describes the snapshot as sticky/latching, consistent with this derivation.
 
 ## Tooling
 
@@ -187,7 +187,7 @@ sealing cut.
 
 ### Layer A non-violation anchor
 
-**Layer A 8 items verbatim** (per `runtime-book/src/en/architecture/16-references.md:22` ordering):
+**Layer A 8 items verbatim** (canonical ordering):
 1. `DOMAIN_CTX` literal
 2. `InvariantLifetime` variance
 3. `Principal` / `KernelEvent` / `StepStage` derives

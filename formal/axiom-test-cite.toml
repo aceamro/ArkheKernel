@@ -6,7 +6,7 @@
 # Companion to formal/tla-plus/README.md narrative table (E1-E15 ↔ TLA+ INV).
 #
 # Anchored to:
-#   - runtime-book/src/en/architecture/11-axioms.md (E1-E15)
+#   - the E1-E15 Runtime axiom set
 #   - formal/tla-plus/{runtime_core,cr1,cr2,cr3,cr4,r4}.tla (TLA+ refinement)
 #   - arkhe-runtime-proofs/src/lib.rs (Kani 4-property suite)
 
@@ -14,7 +14,6 @@
 schema_version = 1
 mc_axiom_count = 12
 formal_method_anchors = "formal/tla-plus/{runtime_core,cr1,cr2,cr3,cr4,r4}.tla"
-spec_anchor = "runtime-book/src/en/architecture/11-axioms.md"
 cycle = "v0.13"
 
 # ============================================================

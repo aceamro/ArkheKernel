@@ -62,6 +62,4 @@ An optional upper layer — **ArkheForge Runtime** (L1+L2) — is under developm
 absorb empirically-proven duplication. Runtime is a separate project, however; you are not required
 to adopt Runtime in order to use this kernel.
 
-- Runtime design spec: [ArkheForge Runtime Book](https://aceamro.github.io/ArkheKernel/runtime-book/en/) (separate mdBook)
-
 Next step: [Getting Started](getting-started.md) — build your first domain in a 5-minute tutorial.

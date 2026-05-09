@@ -9,7 +9,6 @@ live as flat Markdown here.
 | Spec | Path | Renders to |
 |------|------|------------|
 | L0 Kernel design + axioms (A1-A24, S1) | `book/` (mdBook) | `https://aceamro.github.io/ArkheKernel/book/` |
-| ArkheForge Runtime — L1 + L2 design | `runtime-book/` (mdBook) | `https://aceamro.github.io/ArkheKernel/runtime-book/` |
 | Public API reference | `cargo doc --no-deps --workspace` | `https://aceamro.github.io/ArkheKernel/api/arkhe_kernel/` |
 
 Layer independence is one-way: L0 ← Runtime ← Shell. Shell repositories
