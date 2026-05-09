@@ -8,11 +8,11 @@
 
 | Key | Use | Storage | Rotation |
 |---|---|---|---|
-| `runtime-doctor-journal-v1` | Signs each entry of the `runtime_doctor_journal` append-only audit log (spec §12.4 / §14) | HW key (YubiKey 5.7+ / NitroKey 3) — 2-person co-custody | 90d + 30d grace (FG8) |
+| `runtime-doctor-journal-v1` | Signs each entry of the `runtime_doctor_journal` append-only audit log | HW key (YubiKey 5.7+ / NitroKey 3) — 2-person co-custody | 90d + 30d grace |
 | `release-signing-v1` (Ed25519) | Signs binary release tags | HW key — leader-exclusive | 1 year + 30d grace |
 | `release-signing-v1-pqc` (MlDsa65) | PQC Hybrid release signing — activated in a future extension | HW key — leader-exclusive | 1 year |
 
-Currently, 2 are active: `runtime-doctor-journal-v1` + `release-signing-v1`. `release-signing-v1-pqc` is scheduled to be generated and activated in line with the spec §14.7 PQC timeline (`runtime_max ≥ "0.30"`).
+Currently, 2 are active: `runtime-doctor-journal-v1` + `release-signing-v1`. `release-signing-v1-pqc` is scheduled to be generated and activated when the PQC Hybrid signing path becomes the default (`runtime_max ≥ "0.30"`).
 
 ---
 
@@ -162,10 +162,9 @@ Currently at the **policy + procedure documentation** stage — actual key gener
 
 ## 8. References
 
-- Spec §12.4 `runtime_doctor_journal` chain-signed (audit log tamper-resistance).
-- Spec §14.7 PQC timeline — `release-signing-v1-pqc` activation point.
-- Implementation plan §18 Supply chain security — signed release key management.
-- Implementation plan §14 Threat model actor 2 (malicious runtime operator) — 2-person co-custody mitigation.
+- `runtime_doctor_journal` chain-signed audit log — tamper-resistance for operator actions.
+- PQC Hybrid signing path — `release-signing-v1-pqc` activation point.
+- Two-person co-custody — mitigation against malicious-operator threat.
 
 ---
 

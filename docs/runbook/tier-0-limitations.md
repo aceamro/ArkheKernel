@@ -3,10 +3,7 @@
 **Policy restatement**: Tier-0 is **dev / pre-production only**. Operating Tier-0 in any environment that serves real user data (subject to GDPR or equivalent) is **prohibited** — this is a compliance requirement, not a recommendation. Only Tier-1 (KMS free-tier) or above qualifies as a production path.
 
 Related documents:
-- Spec §14.9.1 §§12 Compliance Tier.
 - `docs/release-keys.md` §3 — HW key two-person custody (Tier-1+).
-- Runbook `docs/runbook/crypto-erasure.md` (Tier-1+ crypto-erasure operator path).
-- Runbook `docs/runbook/hsm-degraded-mode.md` (Tier-1+ degraded-mode fallback).
 
 ---
 
@@ -24,7 +21,7 @@ Tier-1+ moves the KEK into an HSM / KMS (FIPS 140-3 certified boundary), out of 
 
 ## 2. Limits of the Process Protection FFI
 
-`arkhe-forge-platform::process_protection` (spec §14.9.1 §§12 HF1) mitigates the exposure window with three syscalls but **does not eliminate it**.
+`arkhe-forge-platform::process_protection` mitigates the exposure window with three syscalls but **does not eliminate it**.
 
 | Primitive | Linux | macOS | Windows | Effect |
 |---|---|---|---|---|
@@ -83,7 +80,7 @@ Operators must verify every item before each deploy. Each missed item drives the
 - [ ] **`ulimit -c 0`** explicit (systemd unit: `LimitCORE=0`).
 - [ ] **`NoNewPrivileges=yes`** under systemd / container — blocks privilege escalation.
 - [ ] **SELinux (enforcing) or AppArmor (enforce)** — restricts non-root `/proc/<pid>/mem` access.
-- [ ] **`kernel.yama.ptrace_scope=2`** (admin-only) — system-wide ptrace block (the spec `linux.rs` probe only warns).
+- [ ] **`kernel.yama.ptrace_scope=2`** (admin-only) — system-wide ptrace block (the runtime's `linux.rs` probe only warns).
 - [ ] **`kernel.dmesg_restrict=1` + `kernel.kptr_restrict=2`** — blocks kernel info leaks.
 
 ### 4.2 Container / VM isolation
@@ -96,7 +93,7 @@ Operators must verify every item before each deploy. Each missed item drives the
 
 ### 4.3 Runtime configuration
 
-- [ ] **Manifest `runtime_max = "0.15"`** observed — v0.16+ binaries emit `ManifestError::SoftwareKekNotPermitted` at parse time (spec §5.6).
+- [ ] **Manifest `runtime_max = "0.15"`** observed — v0.16+ binaries emit `ManifestError::SoftwareKekNotPermitted` at parse time.
 - [ ] **`arkhe_runtime_software_kek_alpha_mode=1` metric** permanently visible on the dashboard — if someone turns it off, that's the signal that Tier-0 → Tier-1 promotion is required.
 - [ ] **Tier-0 retention window** — cap the pre-production duration (recommended: ≤ 30 days, then Tier-1 promote or re-evaluate).
 - [ ] **Ed25519 signing keys** (`runtime-doctor-journal-v1` / `release-signing-v1`) stay on HW keys (YubiKey / NitroKey) even under Tier-0 — `software-kek` only covers the DEK KEK, never signing keys (release-keys §3).
@@ -104,13 +101,13 @@ Operators must verify every item before each deploy. Each missed item drives the
 ### 4.4 Network / access paths
 
 - [ ] **SSH / admin port access control** — bastion / VPN only; never expose Tier-0 host on a public IP.
-- [ ] **L4 adapter TLS compulsory** (spec §5.2 GF3) — plain telnet is allowed on Tier-0 only when the host itself terminates TLS or sits inside a VPN.
-- [ ] **Prometheus endpoint authentication** — public endpoint forbidden (spec §12 telemetry privacy).
+- [ ] **L4 adapter TLS compulsory** — plain telnet is allowed on Tier-0 only when the host itself terminates TLS or sits inside a VPN.
+- [ ] **Prometheus endpoint authentication** — public endpoint forbidden (telemetry privacy).
 
 ### 4.5 Incident response
 
-- [ ] **Suspected KEK compromise → kill the process immediately and scrap the whole deploy** — wipe every record encrypted with that KEK (reuse the full-erasure path of §14.7 Option 1 alpha → beta).
-- [ ] **Tier-1 promotion in waiting** — see `docs/runbook/alpha-to-beta-promote.md`.
+- [ ] **Suspected KEK compromise → kill the process immediately and scrap the whole deploy** — wipe every record encrypted with that KEK using the full-erasure path.
+- [ ] **Tier-1 promotion in waiting** — operator-side promotion procedure.
 
 ---
 
@@ -133,11 +130,6 @@ Operators must verify every item before each deploy. Each missed item drives the
 
 ## 6. References
 
-- Spec §14.9.1 §§12 Compliance Tier.
-- Spec §14.9.1 §§6 HSM degraded mode.
-- Spec §5.6 `ManifestError::SoftwareKekNotPermitted` validation.
-- `docs/runbook/crypto-erasure.md` — Tier-1+ crypto-erasure path.
-- `docs/runbook/alpha-to-beta-promote.md` — Tier-0/1 → Tier-2 promotion procedure.
 - `docs/release-keys.md` §3 — HW key two-person custody policy.
 - Linux `mlockall(2)` / `prctl(2)` man pages.
 - FIPS 140-3 cryptographic module validation — Tier-1/2 foundation.

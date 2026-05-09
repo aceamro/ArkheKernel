@@ -7,7 +7,7 @@ axiom. It is the companion document to the four-piece axiom-cite mechanism: the
 
 ## Purpose
 
-The Runtime axiom set (`runtime-book/src/en/architecture/11-axioms.md` E1–E15) has
+The Runtime axiom set (E1–E15) has
 three independent enforcement layers:
 
 1. **TLA+ refinement** — formal proof of the abstract invariant
@@ -38,8 +38,8 @@ update **all three layers** plus the inventory in a single coherent change.
 The CI grep gate makes the inventory the single source of truth — get the
 inventory right and everything else falls into place.
 
-**Step 1 — spec body**. Add the axiom row to
-`runtime-book/src/en/architecture/11-axioms.md` (statement, L0 lineage, tier).
+**Step 1 — spec body**. Add the axiom row to the canonical axiom inventory
+(statement, L0 lineage, tier).
 
 **Step 2 — TLA+ refinement**. Add an INV (or theorem) capturing the axiom in the
 appropriate `formal/tla-plus/<module>.tla` file. Use PascalCase identifier names
@@ -246,6 +246,6 @@ see 1, fix it and run again to surface any further issues.
 - `scripts/verify-axiom-cite.sh` — grep gate script.
 - `.github/workflows/ci.yml` `lint` job — CI gate integration.
 - `formal/tla-plus/README.md` — TLA+ refinement narrative + E1-E15 ↔ INV table.
-- `runtime-book/src/en/architecture/11-axioms.md` — Runtime axiom set (E1-E15).
+- Runtime axiom set (E1-E15) — canonical narrative carried by the inventory + this guide.
 - `arkhe-forge-core/tests/axioms_e_series.rs` — E1-E13 impl tests.
 - `arkhe-runtime-proofs/src/lib.rs` — Kani 4-property suite.

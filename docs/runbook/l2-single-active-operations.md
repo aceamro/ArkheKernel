@@ -1,13 +1,13 @@
 # Single-Active L2 Operations Runbook — SLO Suspension Policy
 
-**Purpose**: specify the SLO suspension convention so that SLO alerts (e.g., `projection_lag_seconds` p99 < 30s) do not fire as false positives during the **failover / promote / upgrade** periods of spec §14.8 active-passive L2 operations.
+**Purpose**: specify the SLO suspension convention so that SLO alerts (e.g., `projection_lag_seconds` p99 < 30s) do not fire as false positives during the **failover / promote / upgrade** periods of active-passive L2 operations.
 
 ---
 
-## 1. Single-Active operation model (inherited from spec §14.8)
+## 1. Single-Active operation model
 
 - **Single active L2 writer** + **N passive readers** (standby).
-- On active failure, passive → active promotion (operator-initiated by default; if `kms_auto_promote` is enabled, automatic after 60 minutes, spec §14.11.2.1 HF2).
+- On active failure, passive → active promotion (operator-initiated by default; if `kms_auto_promote` is enabled, automatic after 60 minutes via the HF2 Auto-Promote trust model).
 - During promotion, **projection stop / replay / rebuild** is unavoidable — SLO violations for several minutes.
 
 ---
@@ -21,7 +21,7 @@ SLO alerts are **temporarily suspended** in the following cases:
 | Operator-initiated failover (`runtime-doctor failover`) | `projection_lag_seconds` / `observer_restart_total` | start → promote complete + 5 min settle |
 | Auto-promote (after_60min) | Same as above | auto trigger → promote complete + 5 min |
 | Upgrade (binary swap) | Above + `action_duration_seconds` | drain → binary swap → replay → rebuild + 5 min settle |
-| HSM degraded mode (spec §14.9.1 §§6) | `hsm_unavailable_total` retained, only `projection_lag_seconds` | degraded start → healthy recovery |
+| HSM degraded mode | `hsm_unavailable_total` retained, only `projection_lag_seconds` | degraded start → healthy recovery |
 
 **Alerts outside suspension are retained** — critical severity (e.g., `chain_tip_signature` verification fail / `RuntimeInitError::ProcessProtectionUnavailable`) is not subject to suspension. Suspension is limited to **operator-known downtime**.
 
@@ -110,7 +110,7 @@ At suspension end, a corresponding `slo-suspension-end` entry. **Cumulative susp
 - Total suspension / quarter ≤ **30 min**.
 - Individual suspension maximum 15 min.
 
-If exceeded → (a) failover procedure needs improvement / (b) consider zero-downtime failover in Multi-active L2 DIP (future extension spec §15.5 roadmap).
+If exceeded → (a) failover procedure needs improvement / (b) consider zero-downtime failover in a Multi-active L2 model.
 
 ---
 
@@ -139,14 +139,6 @@ If exceeded → (a) failover procedure needs improvement / (b) consider zero-dow
 ```
 
 ---
-
-## 8. References
-
-- Spec §14.8 Multi-L2 model — active-passive only (single-active).
-- Spec §14.9.1 §§6 HSM degraded mode threshold (M-R6-2).
-- Spec §14.11.2.1 HF2 Auto Promote Trust Model.
-- Spec §12.4.1 SLO / Alert policy table.
-- Implementation plan §14 Implementation review — audit log tamper-resistance.
 
 ---
 

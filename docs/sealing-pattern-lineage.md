@@ -133,8 +133,8 @@ is captured in the canonical inventory:
 | Anchor | Spec body | TLA+ refinement | Rust witness |
 | --- | --- | --- | --- |
 | A24 | `book/src/en/architecture/invariants.md:56` | (no TLA+ — type-adjacent at L0 axiom layer) | sealed `pub(crate) fn project()` constructor + private fields |
-| SealedCapToken | `runtime-book/src/en/architecture/11-axioms.md` E15.b | `cr4_observer_capability_confinement.tla` INV `CapTokenSealed` + lemma `SealedTrait_implies_E15.b` | `hook_cap_token_satisfies_sealed_bound`, `observer_cap_token_satisfies_sealed_bound` |
-| SealedHostImport | `runtime-book/src/en/architecture/11-axioms.md` E14 | `cr1_chain_hash_invariant.tla` INV `HostImportSealed` + lemma `SealedHostLinker_implies_4_set` | `hook_capability_linker_satisfies_sealed_host_import`, `observer_capability_linker_satisfies_sealed_host_import` |
+| SealedCapToken | E15.b axiom | `cr4_observer_capability_confinement.tla` INV `CapTokenSealed` + lemma `SealedTrait_implies_E15.b` | `hook_cap_token_satisfies_sealed_bound`, `observer_cap_token_satisfies_sealed_bound` |
+| SealedHostImport | E14 axiom | `cr1_chain_hash_invariant.tla` INV `HostImportSealed` + lemma `SealedHostLinker_implies_4_set` | `hook_capability_linker_satisfies_sealed_host_import`, `observer_capability_linker_satisfies_sealed_host_import` |
 
 The axiom-test-cite inventory (`formal/axiom-test-cite.toml`) is the
 machine-readable form; this document is the human-readable narrative

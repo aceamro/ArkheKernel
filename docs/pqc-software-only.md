@@ -15,7 +15,7 @@ This document is the operator-facing caveat. The kernel's [`SignatureClass::Hybr
 `SoftwareMlDsa65Signer` carries the signing key in process memory:
 
 - **Never serialize the signing key.** The kernel's WAL writer pins only the *verifying* key bytes in the WAL header (`verifying_key_pqc`); the signing key never appears in WAL bytes. `SoftwareMlDsa65Signer` derives `Debug` with the signing key field redacted.
-- **Hold the signer behind a process boundary.** Run the kernel with `mlock_all()` to prevent paging / swap residue (Tier-0 process protection guide in `runtime-book/src/en/architecture/14-open-questions.md`).
+- **Hold the signer behind a process boundary.** Run the kernel with `mlock_all()` to prevent paging / swap residue (Tier-0 process protection guidance in `docs/runbook/tier-0-limitations.md`).
 - **Air-gap recommended for high-stakes deployments.** Software-only signers are vulnerable to host-OS-level memory inspection. Internet isolation reduces the adversary surface to physical access.
 - **Rotate keys periodically.** ML-DSA 65 has no theoretical lifetime limit (FIPS 204), but operational rotation reduces the impact of any single signing-key compromise. Built-in rotation tooling is not provided; rotation requires a fresh `SoftwareMlDsa65Signer::from_seed(new_seed)` and a new WAL.
 - **Seed entropy is critical.** Use a CSPRNG (e.g., `getrandom::getrandom`) to generate the 32-byte seed before passing it to `SignatureClass::new_hybrid_from_secrets`. Do not derive seeds from low-entropy sources (passwords, timestamps).
@@ -42,7 +42,6 @@ When HSM / KMS providers are added behind the `PqcSigner` seam, four categories 
 ## References
 
 - [`arkhe-kernel/src/persist/signature.rs`](../arkhe-kernel/src/persist/signature.rs) — `PqcSigner` / `PqcVerifier` traits + `SoftwareMlDsa65Signer` / `SoftwareMlDsa65Verifier` impl + `SignatureClass::Hybrid` constructor.
-- [`runtime-book/src/en/architecture/14-open-questions.md`](../runtime-book/src/en/architecture/14-open-questions.md) §14.7 — PQC mandate spec body + RuntimeSignatureClass mapping + sticky-Hybrid policy.
 - NIST FIPS 204 — Module-Lattice-Based Digital Signature Standard (ML-DSA, Dilithium-3 = ML-DSA 65). <https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.204.pdf>
 - NSA CNSA 2.0 — Commercial National Security Algorithm Suite 2.0, Hybrid transition spec (Ed25519 + ML-DSA 65 dual-sign for 2026-2030 transition window). <https://www.nsa.gov/Press-Room/Press-Releases-Statements/Press-Release-View/Article/3148990/>
 - RustCrypto `ml-dsa` crate — <https://github.com/RustCrypto/signatures/tree/master/ml-dsa>

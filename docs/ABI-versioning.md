@@ -76,7 +76,7 @@ Beyond the ABI snapshot, the repo has two **hash-pinned wire invariants**. They 
 **Drift response procedure** (Option C):
 1. The regression test `arkhe-forge-platform/src/manifest.rs::digest_invariant::TIER0_DEV_DIGEST_V0_11` surfaces the drift on the first failing build.
 2. The operator updates the sentinel bytes to the new value.
-3. **Companion spec §5.6 + §14.7 micro-patch** — the schema itself did not change, so manifest `schema_version` stays put; the patch records the toml-crate bump as the explicit contract change.
+3. **Companion micro-patch in the canonical ABI policy notes** — the schema itself did not change, so manifest `schema_version` stays put; the patch records the toml-crate bump as the explicit contract change.
 4. Manifest `schema_version` is **not** bumped — Option C avoids the contract ambiguity of "schema_version bump without schema change".
 
 Rejected alternatives: Option B (mix `toml` version into the digest input) leaks a build-dep into the audit log; Option A (bump `schema_version` for non-schema reasons) muddies the contract.
