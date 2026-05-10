@@ -98,7 +98,7 @@ jobs:
       # arkhe-kernel + arkhe-macros preserve their existing fmt
       # convention (L0 + proc-macro / syn patterns). Only examples/dice
       # is checked under rustfmt defaults.
-      - run: cargo fmt -p dice-domain -- --check
+      - run: cargo fmt -p dice -- --check
 
       - run: cargo clippy --workspace --no-deps --all-targets -- -D warnings
 
@@ -109,7 +109,7 @@ jobs:
 
       - name: Run demos (smoke)
         run: |
-          cargo run --quiet -p dice-domain | tail -5
+          cargo run --quiet -p dice | tail -5
 
       # Script integrity verify. Header comments are stripped before
       # `shasum -c` (same pattern as verify-l0-baseline.sh). A mismatch
@@ -281,7 +281,7 @@ jobs:
         run: |
           export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct HEAD)"
           export RUSTFLAGS="--remap-path-prefix=$HOME=/build --remap-path-prefix=$PWD=/build"
-          cargo build --release --locked -p dice-domain
+          cargo build --release --locked -p dice
 
       - name: Package publish-true crates (dependency order)
         run: |
@@ -307,7 +307,7 @@ jobs:
       - name: Copy release binaries
         run: |
           mkdir -p artifacts/bin
-          cp target/release/dice-domain  artifacts/bin/
+          cp target/release/dice  artifacts/bin/
 
       - name: Sign binaries + available crate tarballs (Sigstore keyless)
         env:

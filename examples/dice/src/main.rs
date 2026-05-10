@@ -1,4 +1,4 @@
-//! L1 dice-domain — A1 D1-Total proof carrier.
+//! L1 dice example — A1 D1-Total proof carrier.
 //!
 //! Two stages:
 //!   Stage 1: roll N times against a `Kernel::new_with_wal(...)` instance.

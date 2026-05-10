@@ -39,7 +39,7 @@ criteria = "safe-to-deploy"
 criteria = "safe-to-deploy"
 
 # Domain demo is test-only.
-[policy.dice-domain]
+[policy.dice]
 criteria = "safe-to-run"
 
 # ── Exemptions ─────────────────────────────────────────────────────────────

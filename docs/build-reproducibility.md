@@ -13,7 +13,7 @@ Reproducibility is guaranteed **only under the following conditions**.
 | **Machine** | Same physical / VM (same linker, same libc) | Cross-machine (CI matrix) |
 | **Toolchain** | `rustup stable` (workspace MSRV 1.80+) | `rust-toolchain.toml` pin |
 | **Target** | `x86_64-unknown-linux-gnu` | aarch64-linux / darwin / windows |
-| **Build command** | `cargo build --release --locked -p dice-domain` | distributed build systems |
+| **Build command** | `cargo build --release --locked -p dice` | distributed build systems |
 | **Flags** | `RUSTFLAGS="--remap-path-prefix=$HOME=/build --remap-path-prefix=$PWD=/build"` | — |
 | **Epoch** | `SOURCE_DATE_EPOCH=$(git log -1 --format=%ct HEAD)` | — |
 
@@ -29,7 +29,7 @@ Reproducibility is guaranteed **only under the following conditions**.
 
 ## 2. Verification — `scripts/reproduce-build.sh`
 
-Build the `dice-domain` release binary twice and compare SHA-256. Mismatch → exit 1.
+Build the `dice` release binary twice and compare SHA-256. Mismatch → exit 1.
 
 ```bash
 ./scripts/reproduce-build.sh
@@ -41,8 +41,8 @@ Script internals:
 
 1. Pin `SOURCE_DATE_EPOCH` to `git log -1 --format=%ct HEAD`.
 2. Add `--remap-path-prefix=$HOME=/build --remap-path-prefix=$PWD=/build` to `RUSTFLAGS` — block path leakage.
-3. `cargo clean --release -p dice-domain` → `cargo build --release --locked -p dice-domain`.
-4. Capture `sha256sum target/release/dice-domain`.
+3. `cargo clean --release -p dice` → `cargo build --release --locked -p dice`.
+4. Capture `sha256sum target/release/dice`.
 5. Repeat 2-4 → diff the two hash sets. Identical → green; different → fail.
 
 ---

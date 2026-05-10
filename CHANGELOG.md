@@ -17,7 +17,7 @@ Three crates:
 
 - `arkhe-kernel` — L0 deterministic microkernel
 - `arkhe-macros` — derive macros (`ArkheAction` / `ArkheComponent` / `ArkheEvent`)
-- `examples/dice` — D1-Total bit-identical replay demo (`cargo run -p dice-domain`)
+- `examples/dice` — D1-Total bit-identical replay demo (`cargo run -p dice`)
 
 ### Determinism
 

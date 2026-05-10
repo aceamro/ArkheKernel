@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # reproduce-build.sh — Linux x86_64 binary reproducibility verifier.
 #
-# Double-builds the `dice-domain` release binary with a deterministic
+# Double-builds the `dice` release binary with a deterministic
 # environment (SOURCE_DATE_EPOCH + --remap-path-prefix + --locked) and
 # compares sha256sum across the two builds. Hash drift → exit 1.
 #
@@ -34,18 +34,18 @@ export SOURCE_DATE_EPOCH
 # a different path still produces a byte-identical artifact.
 export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$HOME=/build --remap-path-prefix=$PWD=/build"
 
-BIN_DICE="target/release/dice-domain"
+BIN_DICE="target/release/dice"
 
 hash_artifacts() {
   sha256sum "$BIN_DICE"
 }
 
 build_once() {
-  cargo build --release --locked -p dice-domain
+  cargo build --release --locked -p dice
 }
 
 clean_slate() {
-  cargo clean --release -p dice-domain >/dev/null 2>&1 || true
+  cargo clean --release -p dice >/dev/null 2>&1 || true
 }
 
 echo "reproduce-build: SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
@@ -85,7 +85,7 @@ cat "$SECOND"
 
 if diff -u "$FIRST" "$SECOND" > /dev/null; then
   echo
-  echo "reproduce-build: OK — dice-domain release binary is byte-identical across rebuilds."
+  echo "reproduce-build: OK — dice release binary is byte-identical across rebuilds."
   exit 0
 fi
 

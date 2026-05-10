@@ -390,7 +390,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dice-domain"
+name = "dice"
 version = "0.13.0"
 dependencies = [
  "arkhe-kernel",

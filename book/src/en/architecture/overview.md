@@ -56,9 +56,9 @@ All three derives accept `#[arkhe(type_code = N, schema_version = M)]`.
 3. **Replay** — replaying WAL records from the beginning reaches a chain tip bit-identical to
    the original (A1 D1-Total).
 
-The dice-domain demo exercises all three at once:
+The dice demo exercises all three at once:
 
 ```bash
-cargo run -p dice-domain
+cargo run -p dice
 # ✓ A1 D1-Total verified: WAL replay is bit-identical.
 ```

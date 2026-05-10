@@ -1,6 +1,6 @@
 # Dice Temple Domain
 
-`dice-domain` is a small ArkheKernel example domain that exercises the
+`dice` is a small ArkheKernel example domain that exercises the
 deterministic-replay path with a 3D6 dice roller. It is shipped as an
 illustrative integration test for the kernel's WAL + replay machinery, not
 as a production gambling primitive.
@@ -33,7 +33,7 @@ as a production gambling primitive.
 ## Running
 
 ```bash
-cargo run -p dice-domain
+cargo run -p dice
 ```
 
 The binary prints the rolls produced by the first pass, replays them on a

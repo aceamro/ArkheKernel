@@ -15,7 +15,7 @@ to any L1 application — BBS, games, lotteries, simulations, and so on.
 
 ```toml
 [package]
-name = "dice-domain"
+name = "dice"
 version = "0.1.0"
 edition = "2021"
 
@@ -113,7 +113,7 @@ assert_eq!(tip1, tip2);  // bit-identical chain (A1)
 The `examples/dice/` demo exercises the same pattern end to end, including replay:
 
 ```bash
-cargo run -p dice-domain
+cargo run -p dice
 # ✓ A1 D1-Total verified: WAL replay is bit-identical.
 ```
 

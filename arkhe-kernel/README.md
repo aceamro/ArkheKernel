@@ -44,7 +44,7 @@ assert_eq!(report.effects_applied, 1);
 End-to-end deterministic-replay proof:
 
 ```bash
-cargo run -p dice-domain
+cargo run -p dice
 ```
 
 ## Why ArkheKernel
