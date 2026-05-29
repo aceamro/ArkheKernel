@@ -130,8 +130,11 @@ pub enum DeferReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ObserverHandle(
-    /// Monotonic registry index assigned at registration.
-    pub u16,
+    /// Monotonic registry index assigned at registration. A `u64` (not
+    /// `u16`) so the monotonic counter cannot realistically saturate and
+    /// alias a live handle (the registry has no unregister, so handles
+    /// only ever grow).
+    pub u64,
 );
 
 bitflags! {

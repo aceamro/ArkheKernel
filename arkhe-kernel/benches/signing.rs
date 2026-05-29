@@ -9,7 +9,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use ml_dsa::signature::{Keypair, Signer as PqcSigner, Verifier as PqcVerifier};
-use ml_dsa::{KeyGen, MlDsa65, B32};
+use ml_dsa::{MlDsa65, B32};
 
 const MSG: &[u8] = b"ARKHE chain hash 32-byte tip || canonical record body";
 
@@ -21,7 +21,7 @@ fn ed25519_keypair() -> (SigningKey, VerifyingKey) {
 
 fn mldsa65_signing_key() -> ml_dsa::SigningKey<MlDsa65> {
     let xi: B32 = [9u8; 32].into();
-    MlDsa65::from_seed(&xi)
+    ml_dsa::SigningKey::<MlDsa65>::from_seed(&xi)
 }
 
 fn bench_ed25519_sign(c: &mut Criterion) {

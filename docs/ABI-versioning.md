@@ -4,34 +4,34 @@ ArkheKernel has **two independent version coordinate systems**. They are intenti
 
 ## Two coordinate systems
 
-### 1. Project release tag (`v0.13`)
+### 1. Project release tag (`v0.14`)
 
-- **Location**: release marker across the repo. Each crate's `Cargo.toml` `[package] version` (`0.13.0`), git tag (`v0.13`), `CHANGELOG.md` entry.
+- **Location**: release marker across the repo. Each crate's `Cargo.toml` `[package] version` (`0.14.0`), git tag (`v0.14`), `CHANGELOG.md` entry.
 - **Audience**: project users — "which release am I using at this point in time".
 - **Bump condition**: when there is a public change and the team-lead declares a release.
-- **Policy**: this project aims for a single final release at v0.13. Even if fixes are introduced later, the same version is retained. v1.0 is intentionally never reached.
+- **Policy**: the project release advances only when a release changes the persisted wire format (the v0.13 → v0.14 ML-DSA stabilization being the first such advance); cosmetic fixes retain the version. v1.0 is intentionally never reached.
 
-### 2. L0 kernel ABI snapshot (`(0, 13)` / `(0, 13, 0)`)
+### 2. L0 kernel ABI snapshot (`(0, 14)` / `(0, 14, 0)`)
 
 - **Location**: `arkhe-kernel/src/persist/wal.rs`
   ```rust
-  pub const CURRENT_KERNEL_SEMVER: (u16, u16, u16) = (0, 13, 0);
-  pub const ABI_VERSION:           (u16, u16)      = (0, 13);
+  pub const CURRENT_KERNEL_SEMVER: (u16, u16, u16) = (0, 14, 0);
+  pub const ABI_VERSION:           (u16, u16)      = (0, 14);
   ```
 - **Audience**: binary compatibility verifiers of WAL / snapshot / event bytes (the replay path, external verifiers).
-- **Meaning**: a marker indicating which snapshot the **serialized ABI** of the L0 kernel corresponds to. `(0, 13)` means "L0 ABI snapshot 0.13" — it identifies the set of byte formats including the WAL header, record layout, and `StepStage` discriminant.
+- **Meaning**: a marker indicating which snapshot the **serialized ABI** of the L0 kernel corresponds to. `(0, 14)` means "L0 ABI snapshot 0.14" — it identifies the set of byte formats including the WAL header, record layout, and `StepStage` discriminant.
 - **Bump condition**: when L0 makes a breaking change to its own WAL / event byte layout. That is, bump only under the single condition where replay incompatibility occurs.
 - **Policy**: one of the core protected targets of L0 DO NOT TOUCH. It moves **independently** of project release bumps.
 
 ## Why they are separated
 
-This project includes L0 ABI snapshot `(0, 13)` in the `v0.13` release. The reasons the two values can in general differ are as follows.
+This project includes L0 ABI snapshot `(0, 14)` in the `v0.14` release. The reasons the two values can in general differ are as follows.
 
 - **Different boundaries**: the project release is a repo-level public marker, and the ABI snapshot is a record-level marker of the kernel byte format. Since the meanings differ, there is no basis for the values to match.
 - **Different bump conditions**: the project release may be bumped frequently per unit of public change, but the L0 ABI is bumped only when there is a WAL / snapshot breaking change.
 - **L0 DO NOT TOUCH protection**: the L0 kernel source is protected by baseline hashing (`ci/l0-baseline-hashes.txt`) so that it is not modified without re-review. If L0 source were modified on every project release bump, this protection would lose meaning.
 
-As a result, the two coordinate systems are independent. The fact that project `v0.13` happens to carry L0 ABI `(0, 13)` at this release point is the official combination for v0.13; future releases may carry an unchanged ABI tag.
+As a result, the two coordinate systems are independent. The fact that project `v0.14` happens to carry L0 ABI `(0, 14)` at this release point is the official combination for v0.14; future releases may carry an unchanged ABI tag.
 
 ## What external consumers should look at
 
@@ -56,7 +56,7 @@ L0 source modifications without this procedure are a violation of L0 DO NOT TOUC
 
 ## Summary
 
-- `v0.13` is the repo release, `(0, 13)` is the L0 ABI snapshot — the two are different axes that simply happen to align at this release point.
+- `v0.14` is the repo release, `(0, 14)` is the L0 ABI snapshot — the two are different axes that simply happen to align at this release point.
 - Even when the values differ, the state is intended; if the project release is bumped without an ABI break, the L0 ABI is held constant.
 - External consumers use the coordinate system that matches their purpose: release tag for deployment, ABI snapshot for WAL compatibility.
 - An L0 ABI bump is permitted only through a dedicated DIP path, and requires an exemption record in the DO NOT TOUCH baseline and auditor approval.
@@ -83,4 +83,4 @@ Rejected alternatives: Option B (mix `toml` version into the digest input) leaks
 
 ### WAL chain digest
 
-L0's WAL chain BLAKE3 hash is bound to §1's ABI snapshot `(0, 13)`. The WAL record `postcard` field order is DO NOT TOUCH #8 — Runtime-side changes can never disturb it.
+L0's WAL chain BLAKE3 hash is bound to §1's ABI snapshot `(0, 14)`. The WAL record `postcard` field order is DO NOT TOUCH #7 — Runtime-side changes can never disturb it.

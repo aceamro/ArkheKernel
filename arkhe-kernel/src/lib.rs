@@ -83,8 +83,10 @@
 //!
 //! ## Stability
 //!
-//! v0.13 — single fixed pre-public version (no version bumps before
-//! public release). Version 1.0 is intentionally never reached.
+//! v0.14 — pre-public. The kernel version advances only when a release
+//! changes the persisted wire format (the v0.13 → v0.14 ML-DSA
+//! stabilization being the first such advance); cosmetic fixes keep the
+//! version. Version 1.0 is intentionally never reached.
 
 /// L0 ABI stratum — identifiers, authority principals, capability
 /// bits, and the top-level [`abi::ArkheError`] type. No dependencies
@@ -106,8 +108,8 @@ pub mod runtime;
 pub mod persist;
 
 pub use persist::{
-    KernelSnapshot, ReplayError, ReplayReport, SignatureClass, SnapshotError, Wal, WalError,
-    WalHeader, WalRecord, WalWriter,
+    replay_into_verified, KernelSnapshot, ReplayError, ReplayReport, SignatureClass, SignatureTier,
+    SnapshotError, TrustAnchor, Wal, WalError, WalHeader, WalRecord, WalWriter,
 };
 pub use runtime::event::{EventMask, KernelEvent, ObserverHandle};
 pub use runtime::{InstanceView, Kernel, KernelObserver, Stats, StepReport};

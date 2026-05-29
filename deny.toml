@@ -32,6 +32,16 @@ allow = [
 confidence-threshold = 0.93
 
 [bans]
+# `multiple-versions = "warn"` (not "deny") is INTENTIONAL and reviewed:
+# the PQC Hybrid mandate pairs `ed25519-dalek` 2.x (first-generation
+# RustCrypto trait stack: `signature` 2.x + `digest` 0.10) with `ml-dsa`
+# 0.1.0 (next-generation stack: `signature` 3.x + `digest` 0.11). The two
+# generations cannot be collapsed while BOTH signing schemes are required,
+# so a small, known set of crypto trait/util crates (`signature`,
+# `digest`, and their `crypto-common`/`block-buffer` companions) appears
+# at two versions. This is an accepted, benign duplication; the warning
+# surfaces it for review each build rather than hiding it. Any NEW,
+# unexpected duplicate beyond this set should be investigated.
 multiple-versions = "warn"
 wildcards = "deny"
 highlight = "all"

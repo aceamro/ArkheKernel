@@ -18,17 +18,20 @@
 #   cargo vet diff X 0.1 0.2     # version diff review (manual)
 #   cargo vet certify <crate>    # add a new audit entry (interactive)
 #
-# This repo audits 5 crypto-critical primitives directly. All five sit on
-# the spec §14.9.1 §§1-§§5 envelope-encryption path or the §12.4
-# chain_tip_signature path — they are always present in the runtime
-# binary, so the criteria is `safe-to-deploy`.
+# This repo audits the 4 crypto-critical primitives in its OWN dependency
+# graph directly: the chain-tip signature (`ed25519-dalek`), Hybrid PQC
+# signature (`ml-dsa`), chain hash (`blake3`), and key-clearing
+# (`zeroize`) primitives. All four are always present in the runtime
+# binary, so the criteria is `safe-to-deploy`. (AEAD envelope-encryption
+# primitives such as `aes-gcm` / `chacha20poly1305` live in the sibling
+# ArkheForge repo, NOT in this kernel's graph, and are audited there.)
 #
 # ── Tiered audit policy ───────────────────────────────────────────────────
 # The `cargo vet check` policy in this repo is layered:
 #
-#   1. **Hard fail tier (release-blocker)** — the 5 crypto-critical crates
-#      with entries in this file. They sit on the wire-format /
-#      confidentiality path and must be pruned + re-audited every release.
+#   1. **Hard fail tier (release-blocker)** — the 4 crypto-critical crates
+#      with entries in this file. They sit on the signature / chain-hash /
+#      key-clearing path and must be pruned + re-audited every release.
 #   2. **Advisory tier (CI warning, not fail)** — every other transitive
 #      dep (~50). They may remain in `[exemptions]` without blocking the
 #      alpha. The CI `supply-chain` job's `cargo vet check` step is wrapped
@@ -41,7 +44,7 @@
 #
 # Trust-base imports (Google / Mozilla / Bytecode Alliance) absorb the
 # bulk of the transitive set automatically; the audits in this file are
-# the five not covered by any imported audit set.
+# the crypto-critical primitives not covered by any imported audit set.
 
 [[audits.ed25519-dalek]]
 who      = "veteran <noreply@arkhekernel.invalid>"
@@ -68,30 +71,6 @@ RustSec advisory clean. Source review: unsafe blocks live only on the SIMD
 path; the fallback is fully safe Rust.
 """
 
-[[audits.aes-gcm]]
-who      = "veteran <noreply@arkhekernel.invalid>"
-version  = "0.10.3"
-criteria = "safe-to-deploy"
-notes    = """
-Hardware-accelerated AEAD used by spec §14.9.1 §§3 AeadKind::Aes256Gcm.
-Maintained by the RustCrypto org (P. Skorski et al.). Constant-time GCM
-implementation backed by `subtle`. RustSec advisory clean. The
-deterministic counter-nonce policy from §§3 is enforced by the caller, not
-this crate; this audit covers the primitive only.
-"""
-
-[[audits.chacha20poly1305]]
-who      = "veteran <noreply@arkhekernel.invalid>"
-version  = "0.10.1"
-criteria = "safe-to-deploy"
-notes    = """
-Misuse-resistant AEAD used by spec §14.9.1 §§3 AeadKind::XChaCha20Poly1305
-(default). Maintained by the RustCrypto org. The 192-bit XChaCha20 nonce
-extends the random-nonce collision boundary out to ~2^96, which aligns
-with the DEK rotation SLA. RustSec advisory clean. Constant-time +
-`zeroize` integrated.
-"""
-
 [[audits.zeroize]]
 who      = "veteran <noreply@arkhekernel.invalid>"
 version  = "1.8.2"
@@ -108,22 +87,25 @@ elimination. The unsafe blocks are limited to the volatile write paths
 
 [[audits.ml-dsa]]
 who      = "cryptographer <noreply@arkhekernel.invalid>"
-version  = "0.1.0-rc.9"
+version  = "0.1.0"
 criteria = "safe-to-deploy"
 notes    = """
 PQC Hybrid mandate (book §14.7) — NIST FIPS 204 ML-DSA 65 (Dilithium-3)
 post-quantum signature primitive. Paired with ed25519-dalek for Hybrid
 dual-sign (AND-mode verify) per CNSA 2.0 transition spec. Maintained by
-the RustCrypto org (signatures repo). Pre-release pin (0.1.0-rc.9) follows
-the RustCrypto early-stage convention before 1.0 stabilisation. Source
-review:
-- KeyGen::from_seed deterministic ✓ (FIPS 204 ML-DSA.KeyGen_internal)
-- Signer::sign default = sign_deterministic (no RNG dependency) ✓
+the RustCrypto org (signatures repo). Exact-pinned to the first stable
+point release `=0.1.0` (the `0.1.0-rc.9` → `0.1.0` upgrade was performed
+this release). Source review:
+- SigningKey::<MlDsa65>::from_seed deterministic ✓ (FIPS 204
+  ML-DSA.KeyGen_internal; the `KeyGen` trait was removed at 0.1.0 and
+  keygen is now an inherent `SigningKey` constructor)
+- Signer::try_sign default = sign_deterministic (no RNG dependency) ✓
 - Fixed sizes: SigningKey 4032B / VerifyingKey 1952B / Signature 3309B
-  (FIPS 204 §4 spec match)
-- no_std + zeroize integration via signing_key Drop
+  (FIPS 204 §4 spec match) — wire bytes UNCHANGED across rc.9 → 0.1.0
+- zeroize integration ENABLED via the `ml-dsa/zeroize` feature (pinned in
+  arkhe-kernel/Cargo.toml): signing-key material is scrubbed on Drop
 - 0 unsafe blocks in the hot path
 - Backed by `signature` v3.0 trait crate (RustCrypto)
-- Transient tracking: 0.1.0-rc.X → 0.1.0 → 1.0 stable upgrade path; a
-  breaking change at the upgrade point requires a fresh audit entry.
+- Upgrade tracking: next hop is `0.1.0 → 1.0` stabilisation; a breaking
+  change at that point requires a fresh audit entry.
 """

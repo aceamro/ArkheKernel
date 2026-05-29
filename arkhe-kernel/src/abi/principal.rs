@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 /// Opaque L2-supplied external identity. Kernel does not interpret its
 /// contents (`Mechanism != Policy`). The concrete byte shape is an L2
-/// concern — this newtype carries a `u64` for v0.13 and reserves the
+/// concern — this newtype carries a `u64` for v0.14 and reserves the
 /// option to widen to a fixed-size cryptographic identifier in a future
 /// approximation (deferred `[u8; 32]` option).
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]

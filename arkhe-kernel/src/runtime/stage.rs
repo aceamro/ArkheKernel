@@ -110,15 +110,21 @@ pub(crate) enum LedgerOp {
 /// byte counts at this layer — its bytes are recovered from the ledger
 /// at apply time, so this helper is conservative (under-counts freed
 /// bytes within a single step), favoring false-deny over false-allow.
+///
+/// `size` is a caller-supplied `u64`; a value above `i64::MAX` must NOT
+/// wrap to a negative `i64` (which would shrink the projection and let an
+/// oversized component slip past the budget gate). `i64::try_from(..)
+/// .unwrap_or(i64::MAX)` clamps an oversized add to the maximum positive
+/// magnitude, so it always trips the deny path rather than bypassing it.
 pub(crate) fn bytes_delta(stage: &StepStage) -> i64 {
     let mut d: i64 = 0;
     for op in &stage.ledger_delta.ops {
         match op {
             LedgerOp::AddComponent { size, .. } => {
-                d = d.saturating_add(*size as i64);
+                d = d.saturating_add(i64::try_from(*size).unwrap_or(i64::MAX));
             }
             LedgerOp::RemoveComponent { size, .. } => {
-                d = d.saturating_sub(*size as i64);
+                d = d.saturating_sub(i64::try_from(*size).unwrap_or(i64::MAX));
             }
             LedgerOp::AddEntity(_) | LedgerOp::RemoveEntity(_) => {}
         }
@@ -184,6 +190,21 @@ mod tests {
         };
         let _ = ScheduledEntryDelta::Add(entry).clone();
         let _ = ScheduledEntryDelta::Remove(ScheduledActionId::new(1).unwrap()).clone();
+    }
+
+    #[test]
+    fn bytes_delta_clamps_oversized_size_no_negative_wrap() {
+        // Regression: a size above i64::MAX must clamp to i64::MAX (positive),
+        // never wrap negative — otherwise the budget projection would shrink
+        // and let an oversized component bypass the memory budget gate.
+        let id = EntityId::new(1).unwrap();
+        let mut stage = StepStage::default();
+        stage.ledger_delta.ops.push(LedgerOp::AddComponent {
+            entity: id,
+            type_code: TypeCode(1),
+            size: u64::MAX,
+        });
+        assert_eq!(bytes_delta(&stage), i64::MAX);
     }
 
     #[test]

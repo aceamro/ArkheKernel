@@ -8,12 +8,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::abi::{InstanceId, Principal, Tick, TypeCode};
+use crate::abi::{EntityId, InstanceId, Principal, Tick, TypeCode};
 use crate::runtime::stage::StepStage;
 
 use super::signature::{SignatureClass, VerifierClass};
 
-/// Pinned `(TypeCode, schema_hash)` registered for this world. v0.13 ships
+/// Pinned `(TypeCode, schema_hash)` registered for this world. v0.14 ships
 /// the slot empty; the snapshot integration will populate it from
 /// `ActionRegistry` (cross-restart pin set).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -68,20 +68,21 @@ impl WalHeader {
     /// Magic bytes used at the head of the encoded WAL.
     pub const MAGIC: [u8; 8] = *b"ARKHEWAL";
     /// Kernel semver pinned by [`WalWriter::new`].
-    pub const CURRENT_KERNEL_SEMVER: (u16, u16, u16) = (0, 13, 0);
+    pub const CURRENT_KERNEL_SEMVER: (u16, u16, u16) = (0, 14, 0);
     /// ABI semver pinned by [`WalWriter::new`].
-    pub const ABI_VERSION: (u16, u16) = (0, 13);
+    pub const ABI_VERSION: (u16, u16) = (0, 14);
     /// Postcard major version pinned by [`WalWriter::new`].
     pub const POSTCARD_MAJOR: u32 = 1;
     /// BLAKE3 major version pinned by [`WalWriter::new`].
     pub const BLAKE3_MAJOR: u32 = 1;
     /// Domain-separation byte string fed into `blake3::derive_key` to
-    /// produce the WAL chain key. "v0.13" inside this literal is the
-    /// public release version anchor — pre-public single fix per user
-    /// directive 2026-05-03, no further version bumps. Any change
-    /// invalidates every WAL chain ever produced (Layer A item 1
+    /// produce the WAL chain key. The "v0.14" anchor pins the chain
+    /// epoch; it advances with a release whose persisted wire format
+    /// changes (the v0.13 → v0.14 ML-DSA stabilization being the first
+    /// such advance). Any change rederives every chain key and
+    /// invalidates all prior-epoch WAL chains (Layer A item 1
     /// byte-identity invariant — A1/A14).
-    pub const DOMAIN_CTX: &'static [u8] = b"arkhe-kernel v0.13 WAL chain domain separation context";
+    pub const DOMAIN_CTX: &'static [u8] = b"arkhe-kernel v0.14 WAL chain domain separation context";
 }
 
 /// One-byte annotation summarizing whether every Op in the record's
@@ -107,6 +108,12 @@ pub struct WalRecord {
     pub instance: InstanceId,
     /// Principal under which the action was submitted.
     pub principal: Principal,
+    /// Submitting entity (the `actor` passed to `submit`), if any. Part of
+    /// the canonical input — it feeds `ActionContext::actor` during
+    /// `compute()` — so it MUST be persisted AND chain-hashed (it is a
+    /// `WalRecordBody` field) to keep replay bit-identical (A1) for any
+    /// module that branches on `ctx.actor`.
+    pub actor: Option<EntityId>,
     /// Type code of the executed action.
     pub action_type_code: TypeCode,
     /// Canonical action bytes (replay deserializes from these).
@@ -142,6 +149,7 @@ struct WalRecordBody<'a> {
     at: Tick,
     instance: InstanceId,
     principal: &'a Principal,
+    actor: Option<EntityId>,
     action_type_code: TypeCode,
     action_bytes: &'a [u8],
     caps_bits: u64,
@@ -162,6 +170,7 @@ impl<'a> WalRecordBody<'a> {
             at: rec.at,
             instance: rec.instance,
             principal: &rec.principal,
+            actor: rec.actor,
             action_type_code: rec.action_type_code,
             action_bytes: &rec.action_bytes,
             caps_bits: rec.caps_bits,
@@ -181,6 +190,51 @@ pub struct Wal {
     pub header: WalHeader,
     /// Records in append order.
     pub records: Vec<WalRecord>,
+}
+
+/// Signature strength tier advertised by a WAL header, ordered
+/// `None < Ed25519 < Hybrid`. Compared against [`TrustAnchor::min_tier`]
+/// to reject a downgrade.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SignatureTier {
+    /// No signatures (chain integrity only).
+    None,
+    /// RFC 8032 Ed25519.
+    Ed25519,
+    /// Hybrid Ed25519 + ML-DSA 65.
+    Hybrid,
+}
+
+/// Operator-supplied trust anchor for authenticated WAL verification
+/// ([`Wal::verify_chain_anchored`]).
+///
+/// [`Wal::verify_chain`] derives its verification policy and keys from the
+/// WAL header. Under the threat model where WAL bytes are attacker-
+/// controlled (a tampered on-disk log or a malicious peer's snapshot),
+/// that lets an attacker downgrade the tier to `None` (skipping all
+/// signature checks) or substitute their own keys and re-sign the whole
+/// chain. A `TrustAnchor` closes that gap: the caller pins — out-of-band —
+/// the minimum tier and the exact verifying key(s) it trusts. The kernel
+/// provides the MECHANISM (compare the header against the anchor; reject
+/// downgrade / substitution / truncation); the caller owns the POLICY
+/// (which key and tier to require). Unset (`None`) fields impose no check.
+#[derive(Debug, Clone, Default)]
+pub struct TrustAnchor {
+    /// Minimum acceptable signature tier. A header weaker than this is
+    /// rejected with [`WalError::TierDowngrade`].
+    pub min_tier: Option<SignatureTier>,
+    /// Expected Ed25519 verifying-key bytes; the header's pinned key must
+    /// equal this (else [`WalError::VerifyingKeyMismatch`]).
+    pub ed25519_verifying_key: Option<[u8; 32]>,
+    /// Expected ML-DSA 65 verifying-key bytes (Hybrid); the header's
+    /// pinned PQC key must equal this.
+    pub mldsa_verifying_key: Option<Vec<u8>>,
+    /// Expected `manifest_digest` (A14); rejects a WAL written under a
+    /// different `ModuleManifest`.
+    pub expected_manifest_digest: Option<[u8; 32]>,
+    /// Expected final chain tip; pins the record count so a tail
+    /// truncation (a chain-consistent prefix) is detected.
+    pub expected_chain_tip: Option<[u8; 32]>,
 }
 
 /// Append-only WAL writer. Each successful `Kernel::step` writes one
@@ -247,6 +301,7 @@ impl WalWriter {
         at: Tick,
         instance: InstanceId,
         principal: Principal,
+        actor: Option<EntityId>,
         action_type_code: TypeCode,
         action_bytes: Vec<u8>,
         caps_bits: u64,
@@ -259,6 +314,7 @@ impl WalWriter {
             at,
             instance,
             principal: &principal,
+            actor,
             action_type_code,
             action_bytes: &action_bytes,
             caps_bits,
@@ -286,6 +342,7 @@ impl WalWriter {
             at,
             instance,
             principal,
+            actor,
             action_type_code,
             action_bytes,
             caps_bits,
@@ -413,6 +470,72 @@ impl Wal {
         }
         Ok(())
     }
+
+    /// The signature tier the header advertises, derived from which
+    /// verifying-key slots are populated. `(None, Some)` is the invalid
+    /// PQC-without-Ed25519 envelope.
+    fn header_tier(&self) -> Result<SignatureTier, WalError> {
+        match (
+            self.header.verifying_key.is_some(),
+            self.header.verifying_key_pqc.is_some(),
+        ) {
+            (false, false) => Ok(SignatureTier::None),
+            (true, false) => Ok(SignatureTier::Ed25519),
+            (true, true) => Ok(SignatureTier::Hybrid),
+            (false, true) => Err(WalError::PqcWithoutEd25519),
+        }
+    }
+
+    /// Verify the chain AND authenticate it against a caller-supplied
+    /// [`TrustAnchor`]. Use this when the WAL bytes are untrusted (a
+    /// tampered log or a peer's snapshot): beyond [`verify_chain`]'s
+    /// integrity checks it rejects a tier downgrade below `anchor
+    /// .min_tier`, a verifying-key substitution (header key != the
+    /// anchored key), a `manifest_digest` mismatch, and a tail truncation
+    /// (tip != the anchored `expected_chain_tip`). `world_id` is supplied
+    /// by the caller out-of-band — NOT read from the (untrusted) header.
+    pub fn verify_chain_anchored(
+        &self,
+        world_id: [u8; 32],
+        anchor: &TrustAnchor,
+    ) -> Result<(), WalError> {
+        // (1) Tier floor — reject a downgrade (e.g. header stripped to None).
+        let tier = self.header_tier()?;
+        if let Some(floor) = anchor.min_tier {
+            if tier < floor {
+                return Err(WalError::TierDowngrade);
+            }
+        }
+        // (2) Key pinning — the header's keys must equal the anchored keys,
+        // so an attacker cannot substitute their own keypair and re-sign.
+        if let Some(expected) = anchor.ed25519_verifying_key {
+            match self.header.verifying_key {
+                Some(k) if k == expected => {}
+                _ => return Err(WalError::VerifyingKeyMismatch),
+            }
+        }
+        if let Some(expected) = anchor.mldsa_verifying_key.as_deref() {
+            match self.header.verifying_key_pqc.as_deref() {
+                Some(k) if k == expected => {}
+                _ => return Err(WalError::VerifyingKeyMismatch),
+            }
+        }
+        // (3) Manifest pinning (A14).
+        if let Some(expected) = anchor.expected_manifest_digest {
+            if self.header.manifest_digest != expected {
+                return Err(WalError::ManifestDigestMismatch);
+            }
+        }
+        // (4) Integrity + signature verification over the caller's world_id.
+        self.verify_chain(world_id)?;
+        // (5) Tail-truncation — the verified tip must equal the anchored tip.
+        if let Some(expected_tip) = anchor.expected_chain_tip {
+            if self.chain_tip() != expected_tip {
+                return Err(WalError::ChainTipMismatch);
+            }
+        }
+        Ok(())
+    }
 }
 
 /// WAL operation failures. `#[non_exhaustive]` — adding variants is
@@ -466,6 +589,19 @@ pub enum WalError {
     /// `verifying_key=Some`. Ed25519 is the chain-anchor companion;
     /// PQC-only envelope is rejected.
     PqcWithoutEd25519,
+    /// The header advertises a signature tier weaker than the caller's
+    /// [`TrustAnchor::min_tier`] — a downgrade attempt (e.g. a header
+    /// stripped to `None` to skip all signature verification).
+    TierDowngrade,
+    /// The header's pinned verifying key does not equal the key the
+    /// caller's [`TrustAnchor`] expects — a key-substitution attempt.
+    VerifyingKeyMismatch,
+    /// The header's `manifest_digest` does not equal the caller's expected
+    /// digest (A14 manifest pinning under a [`TrustAnchor`]).
+    ManifestDigestMismatch,
+    /// The verified chain tip does not equal the caller's expected tip —
+    /// a tail truncation (a chain-consistent prefix) was detected.
+    ChainTipMismatch,
 }
 
 impl core::fmt::Display for WalError {
@@ -500,6 +636,20 @@ impl core::fmt::Display for WalError {
                 f,
                 "wal envelope invalid (verifying_key_pqc set without verifying_key)"
             ),
+            Self::TierDowngrade => write!(
+                f,
+                "wal signature tier downgraded below the trust anchor's minimum"
+            ),
+            Self::VerifyingKeyMismatch => write!(
+                f,
+                "wal verifying key does not match the trust anchor's expected key"
+            ),
+            Self::ManifestDigestMismatch => {
+                write!(f, "wal manifest_digest does not match the expected digest")
+            }
+            Self::ChainTipMismatch => {
+                write!(f, "wal chain tip does not match the expected tip (tail truncation?)")
+            }
         }
     }
 }
@@ -554,6 +704,7 @@ mod tests {
             Tick(5),
             InstanceId::new(1).unwrap(),
             Principal::System,
+            None,
             TypeCode(100),
             vec![1, 2, 3],
             0,
@@ -574,6 +725,7 @@ mod tests {
                 Tick(i),
                 InstanceId::new(1).unwrap(),
                 Principal::System,
+                None,
                 TypeCode(100),
                 vec![i as u8],
                 0,
@@ -601,6 +753,7 @@ mod tests {
                 Tick(i),
                 InstanceId::new(1).unwrap(),
                 Principal::System,
+                None,
                 TypeCode(100),
                 vec![i as u8],
                 0,
@@ -624,6 +777,7 @@ mod tests {
                 Tick(i),
                 InstanceId::new(1).unwrap(),
                 Principal::System,
+                None,
                 TypeCode(100),
                 vec![i as u8],
                 0,
@@ -654,6 +808,7 @@ mod tests {
                 Tick(0),
                 InstanceId::new(1).unwrap(),
                 Principal::System,
+                None,
                 TypeCode(100),
                 vec![],
                 0,
@@ -673,6 +828,7 @@ mod tests {
             Tick(0),
             InstanceId::new(1).unwrap(),
             Principal::System,
+            None,
             TypeCode(100),
             vec![],
             0,
@@ -692,6 +848,7 @@ mod tests {
             Tick(0),
             InstanceId::new(1).unwrap(),
             Principal::External(ExternalId(7)),
+            None,
             TypeCode(101),
             vec![],
             0,
@@ -712,7 +869,7 @@ mod tests {
     fn header_carries_magic_and_versions() {
         let h = WalWriter::new(world(), manifest()).header().clone();
         assert_eq!(h.magic, *b"ARKHEWAL");
-        assert_eq!(h.kernel_semver, (0, 13, 0));
+        assert_eq!(h.kernel_semver, (0, 14, 0));
         assert_eq!(h.world_id, world());
         assert_eq!(h.manifest_digest, manifest());
         assert!(h.type_registry_pins.is_empty());
@@ -727,6 +884,7 @@ mod tests {
             Tick(0),
             InstanceId::new(1).unwrap(),
             Principal::System,
+            None,
             TypeCode(100),
             vec![1, 2, 3],
             0,
@@ -874,18 +1032,82 @@ mod tests {
         //   `printf '%s' "<new bytes>" | b3sum --no-names`
         // and update both `EXPECTED` and `FROZEN_HEX` together.
         // Layer A item 1 escalation review required.
-        const EXPECTED: &[u8] = b"arkhe-kernel v0.13 WAL chain domain separation context";
+        const EXPECTED: &[u8] = b"arkhe-kernel v0.14 WAL chain domain separation context";
         assert_eq!(WalHeader::DOMAIN_CTX, EXPECTED);
         assert_eq!(WalHeader::DOMAIN_CTX.len(), 54);
 
         // Frozen BLAKE3 hex of the canonical bytes (regression pin).
-        const FROZEN_HEX: &str = "a2537fb224ba77e9a3d9237ae7afac2db2d3cc1f45ddb1fd9d07548e6eee6ab8";
+        const FROZEN_HEX: &str = "4c20c496b74ba868f2669cfcc1a8b6f4c2e0f122bdba5e0337eaeebe599a1fda";
         let actual_hex = blake3::hash(WalHeader::DOMAIN_CTX).to_hex();
         assert_eq!(
             actual_hex.as_str(),
             FROZEN_HEX,
             "DOMAIN_CTX BLAKE3 hash regression — byte-level edit detected",
         );
+    }
+
+    #[test]
+    fn wal_record_persists_actor_for_replay_determinism() {
+        // Regression (#1): the submit-time actor is canonical input (it
+        // feeds `ctx.actor`) and must survive into the record AND the
+        // chain hash so replay is bit-identical for modules that read it.
+        let mut w = WalWriter::new(world(), manifest());
+        let actor = Some(EntityId::new(42).unwrap());
+        w.append(
+            Tick(0),
+            InstanceId::new(1).unwrap(),
+            Principal::System,
+            actor,
+            TypeCode(100),
+            vec![1, 2, 3],
+            0,
+            sample_stage(),
+            AuthDecisionAnnotation::AllAuthorized,
+        )
+        .unwrap();
+        let wal = Wal::from_writer(w);
+        assert_eq!(wal.records[0].actor, actor);
+        assert!(wal.verify_chain(world()).is_ok());
+    }
+
+    #[test]
+    fn verify_chain_anchored_rejects_downgrade_and_substitution() {
+        // Regression (#1/#2 security): an anchored verify must reject a
+        // tier downgrade and a verifying-key substitution.
+        let sig = SignatureClass::new_ed25519_from_secret([7u8; 32]);
+        let vk = sig.verifying_key_bytes().unwrap();
+        let mut w = WalWriter::with_signature(world(), manifest(), sig);
+        append_one(&mut w);
+        let wal = Wal::from_writer(w);
+
+        // Correct anchor (Ed25519 floor + matching key) → Ok.
+        let good = TrustAnchor {
+            min_tier: Some(SignatureTier::Ed25519),
+            ed25519_verifying_key: Some(vk),
+            ..Default::default()
+        };
+        assert!(wal.verify_chain_anchored(world(), &good).is_ok());
+
+        // Downgrade: require Hybrid, WAL is only Ed25519 → reject.
+        let downgrade = TrustAnchor {
+            min_tier: Some(SignatureTier::Hybrid),
+            ..Default::default()
+        };
+        assert!(matches!(
+            wal.verify_chain_anchored(world(), &downgrade),
+            Err(WalError::TierDowngrade)
+        ));
+
+        // Substitution: anchor expects a different key → reject.
+        let wrong_key = TrustAnchor {
+            min_tier: Some(SignatureTier::Ed25519),
+            ed25519_verifying_key: Some([0xAB; 32]),
+            ..Default::default()
+        };
+        assert!(matches!(
+            wal.verify_chain_anchored(world(), &wrong_key),
+            Err(WalError::VerifyingKeyMismatch)
+        ));
     }
 
     // ---- PQC envelope wire format (Layer A item 7 post-extension) ----
@@ -901,7 +1123,7 @@ mod tests {
         append_one(&mut w);
         let wal = Wal::from_writer(w);
         let encoded = postcard::to_allocvec(&wal.records[0]).expect("postcard encode");
-        const FROZEN_HEX: &str = "63655e756cf063655522dff4b8cc053019ab44846b767f67310816dcdf04d167";
+        const FROZEN_HEX: &str = "170607201a4352833ebfe81a1546b4937cdafd587a3e266408b6c1a6bea16709";
         let actual = blake3::hash(&encoded);
         assert_eq!(
             actual.to_hex().as_str(),
@@ -975,6 +1197,7 @@ mod tests {
             Tick(0),
             InstanceId::new(1).unwrap(),
             Principal::System,
+            None,
             TypeCode(100),
             vec![1, 2, 3],
             0,
@@ -983,7 +1206,7 @@ mod tests {
         )
         .unwrap();
         let wal = Wal::from_writer(w);
-        const FROZEN_HEX: &str = "52c2764721d6ab8e709f13987c78c4482e05d41fe44f9aff5a538ac61af148d4";
+        const FROZEN_HEX: &str = "4bb26e665e904314600b52b0d3bef34ee476de1c155f701fa95c8f5438140319";
         let actual_hex = blake3::Hash::from(wal.records[0].this_chain_hash).to_hex();
         assert_eq!(
             actual_hex.as_str(),
@@ -1003,6 +1226,7 @@ mod tests {
             Tick(42),
             InstanceId::new(99).unwrap(),
             Principal::System,
+            None,
             TypeCode(0xCAFE),
             vec![0xAA, 0xBB, 0xCC],
             0xFF,
@@ -1012,7 +1236,7 @@ mod tests {
         .unwrap();
         let wal = Wal::from_writer(w);
         let encoded = postcard::to_allocvec(&wal.records[0]).expect("postcard encode");
-        const FROZEN_HEX: &str = "d6ffb241f7f5a277ef2402fd25184620bac8f6539eb3f853f5d3562d2ce29ad8";
+        const FROZEN_HEX: &str = "ca468fac6ac1c0742c3b48e6398290630015411da040cf22c0228012b7e71cfa";
         let actual = blake3::hash(&encoded);
         assert_eq!(
             actual.to_hex().as_str(),

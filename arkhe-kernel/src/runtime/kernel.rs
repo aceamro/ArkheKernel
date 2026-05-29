@@ -295,6 +295,13 @@ impl Kernel {
             .instances
             .get_mut(&instance)
             .ok_or(ArkheError::InstanceNotFound)?;
+        // Back-pressure (#15): bound the scheduler so an external caller
+        // cannot flood `submit` into unbounded growth. `max_scheduled == 0`
+        // means unlimited (default `InstanceConfig`).
+        let max_scheduled = inst.config().max_scheduled;
+        if max_scheduled > 0 && inst.scheduler().len() >= max_scheduled as usize {
+            return Err(ArkheError::QuotaExceeded);
+        }
         let counters = inst.id_counters_mut();
         counters.next_scheduled = counters.next_scheduled.saturating_add(1);
         let id = ScheduledActionId::new(counters.next_scheduled).expect("scheduled id > 0");
@@ -343,7 +350,8 @@ impl Kernel {
             let mut stage = StepStage::default();
             let mut next_scheduled_id = inst_ref.id_counters_snapshot().next_scheduled;
             let budget = inst_ref.config().memory_budget_bytes;
-            let baseline_bytes: i64 = inst_ref.ledger().total_bytes() as i64;
+            let baseline_bytes: i64 =
+                i64::try_from(inst_ref.ledger().total_bytes()).unwrap_or(i64::MAX);
             let mut any_denied = false;
             for op in ops {
                 let principal_clone = match &entry.principal {
@@ -359,19 +367,63 @@ impl Kernel {
                         // Authorize-deny rolls back the whole stage (any_denied);
                         // budget-deny is a per-Op skip that does NOT rollback.
                         if budget > 0 {
+                            // `size` is a caller-supplied `u64`; clamp to
+                            // `i64::MAX` so a value above `i64::MAX` cannot wrap
+                            // negative and shrink the projection past the gate.
                             let op_size: i64 = match &authorized.op {
-                                crate::state::Op::SetComponent { size, .. } => *size as i64,
-                                crate::state::Op::RemoveComponent { size, .. } => -(*size as i64),
+                                crate::state::Op::SetComponent { size, .. } => {
+                                    i64::try_from(*size).unwrap_or(i64::MAX)
+                                }
+                                crate::state::Op::RemoveComponent { size, .. } => {
+                                    i64::try_from(*size).unwrap_or(i64::MAX).saturating_neg()
+                                }
                                 _ => 0,
                             };
                             let projected = baseline_bytes
                                 .saturating_add(super::stage::bytes_delta(&stage))
                                 .saturating_add(op_size);
-                            if projected > budget as i64 {
+                            if projected > i64::try_from(budget).unwrap_or(i64::MAX) {
                                 report.effects_denied = report.effects_denied.saturating_add(1);
                                 stage.events.push_back(KernelEvent::EffectFailed {
                                     instance: inst_id,
                                     reason: bytes::Bytes::from_static(b"budget_exceeded"),
+                                });
+                                continue;
+                            }
+                        }
+                        // Entity quota (#5; `max_entities == 0` = unlimited).
+                        // Conservative projection = committed live entities +
+                        // entity-spawns staged so far this step (favors
+                        // false-deny, like the byte-budget gate).
+                        let max_entities = inst_ref.config().max_entities;
+                        if max_entities > 0
+                            && matches!(&authorized.op, crate::state::Op::SpawnEntity { .. })
+                        {
+                            let projected_entities = (inst_ref.entities_len() as u64)
+                                .saturating_add(stage.id_counters.next_entity_advance);
+                            if projected_entities >= max_entities as u64 {
+                                report.effects_denied = report.effects_denied.saturating_add(1);
+                                stage.events.push_back(KernelEvent::EffectFailed {
+                                    instance: inst_id,
+                                    reason: bytes::Bytes::from_static(b"entity_quota_exceeded"),
+                                });
+                                continue;
+                            }
+                        }
+                        // Scheduled-action quota (#8; `max_scheduled == 0` =
+                        // unlimited). Projection = current scheduler depth +
+                        // schedule-adds staged so far this step.
+                        let max_scheduled = inst_ref.config().max_scheduled;
+                        if max_scheduled > 0
+                            && matches!(&authorized.op, crate::state::Op::ScheduleAction { .. })
+                        {
+                            let projected_scheduled = (inst_ref.scheduler().len() as u64)
+                                .saturating_add(stage.id_counters.next_scheduled_advance);
+                            if projected_scheduled >= max_scheduled as u64 {
+                                report.effects_denied = report.effects_denied.saturating_add(1);
+                                stage.events.push_back(KernelEvent::EffectFailed {
+                                    instance: inst_id,
+                                    reason: bytes::Bytes::from_static(b"scheduled_quota_exceeded"),
                                 });
                                 continue;
                             }
@@ -417,6 +469,7 @@ impl Kernel {
             };
             let action_bytes_for_wal = entry.action_bytes.clone();
             let action_type_for_wal = entry.action_type_code;
+            let actor_for_wal = entry.actor;
 
             let inst_mut = self.instances.get_mut(&inst_id).expect("instance present");
             apply_stage(inst_mut, stage);
@@ -426,6 +479,7 @@ impl Kernel {
                     now,
                     inst_id,
                     principal_for_wal,
+                    actor_for_wal,
                     action_type_for_wal,
                     action_bytes_for_wal,
                     caps.bits(),
@@ -520,6 +574,45 @@ mod tests {
         }
     }
 
+    // Emits three SpawnEntity ops with distinct ids (max_entities quota test).
+    #[derive(Serialize, Deserialize)]
+    struct SpawnThreeAction;
+    impl Sealed for SpawnThreeAction {}
+    impl ActionDeriv for SpawnThreeAction {
+        const TYPE_CODE: TypeCode = TypeCode(103);
+        const SCHEMA_VERSION: u32 = 1;
+    }
+    impl ActionCompute for SpawnThreeAction {
+        fn compute(&self, _ctx: &ActionContext) -> Vec<Op> {
+            (1..=3)
+                .map(|n| Op::SpawnEntity {
+                    id: EntityId::new(n).unwrap(),
+                    owner: Principal::System,
+                })
+                .collect()
+        }
+    }
+
+    // Emits a SetComponent with a declared size above i64::MAX (budget-bypass
+    // regression: the size must NOT wrap negative past the budget gate).
+    #[derive(Serialize, Deserialize)]
+    struct OversizedSetAction;
+    impl Sealed for OversizedSetAction {}
+    impl ActionDeriv for OversizedSetAction {
+        const TYPE_CODE: TypeCode = TypeCode(104);
+        const SCHEMA_VERSION: u32 = 1;
+    }
+    impl ActionCompute for OversizedSetAction {
+        fn compute(&self, _ctx: &ActionContext) -> Vec<Op> {
+            vec![Op::SetComponent {
+                entity: EntityId::new(1).unwrap(),
+                type_code: TypeCode(7),
+                bytes: Bytes::from_static(b"x"),
+                size: u64::MAX,
+            }]
+        }
+    }
+
     struct CountingObserver {
         count: Arc<AtomicU32>,
     }
@@ -562,6 +655,58 @@ mod tests {
             Vec::new(),
         );
         assert!(matches!(result, Err(ArkheError::InstanceNotFound)));
+    }
+
+    #[test]
+    fn submit_back_pressures_at_max_scheduled() {
+        // Regression (#15/#8): submit must bound the scheduler, returning
+        // QuotaExceeded rather than admitting unbounded growth.
+        let mut k = Kernel::new();
+        let inst = k.create_instance(InstanceConfig {
+            max_scheduled: 2,
+            ..Default::default()
+        });
+        let sub = |k: &mut Kernel| {
+            k.submit(inst, Principal::System, None, Tick(0), TypeCode(100), Vec::new())
+        };
+        assert!(sub(&mut k).is_ok());
+        assert!(sub(&mut k).is_ok());
+        assert!(matches!(sub(&mut k), Err(ArkheError::QuotaExceeded)));
+    }
+
+    #[test]
+    fn step_denies_spawns_past_max_entities() {
+        // Regression (#5): the entity quota is enforced per-Op in step();
+        // exactly max_entities commit, the rest deny without rollback.
+        let mut k = Kernel::new();
+        k.register_action::<SpawnThreeAction>();
+        let inst = k.create_instance(InstanceConfig {
+            max_entities: 2,
+            ..Default::default()
+        });
+        k.submit(inst, Principal::System, None, Tick(0), TypeCode(103), Vec::new())
+            .unwrap();
+        let report = k.step(Tick(0), CapabilityMask::SYSTEM);
+        assert_eq!(report.effects_applied, 2);
+        assert_eq!(report.effects_denied, 1);
+        assert_eq!(k.instances.get(&inst).unwrap().entities_len(), 2);
+    }
+
+    #[test]
+    fn step_denies_oversized_component_no_budget_bypass() {
+        // Regression (#4): a declared size > i64::MAX must trip the budget
+        // deny path, not wrap negative and slip past it.
+        let mut k = Kernel::new();
+        k.register_action::<OversizedSetAction>();
+        let inst = k.create_instance(InstanceConfig {
+            memory_budget_bytes: 1000,
+            ..Default::default()
+        });
+        k.submit(inst, Principal::System, None, Tick(0), TypeCode(104), Vec::new())
+            .unwrap();
+        let report = k.step(Tick(0), CapabilityMask::SYSTEM);
+        assert_eq!(report.effects_applied, 0);
+        assert_eq!(report.effects_denied, 1);
     }
 
     #[test]

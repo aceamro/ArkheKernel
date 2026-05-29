@@ -136,7 +136,7 @@ pub(crate) fn authorize<'i>(
 /// cap bits are reserved (deferred).
 fn match_op_cap(op: &Op, caps: CapabilityMask) -> bool {
     match op {
-        // Basic state mutations: open to External in v0.13.
+        // Basic state mutations: open to External in v0.14.
         Op::SpawnEntity { .. }
         | Op::DespawnEntity { .. }
         | Op::SetComponent { .. }

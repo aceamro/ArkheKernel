@@ -1,6 +1,6 @@
 [package]
 name = "arkhe-kernel"
-version = "0.13.0"
+version = "0.14.0"
 edition = "2021"
 rust-version.workspace = true
 description = "Domain-neutral deterministic microkernel for virtual worlds. WAL-backed, bit-identical replay, invariant-lifetime shell brand, no async / no unsafe / no floating-point in canonical paths."
@@ -19,13 +19,17 @@ bitflags = { version = "2.6", features = ["serde"] }
 bytes = { version = "1.7", features = ["serde"] }
 blake3 = "1.5"
 postcard = { version = "1.0", features = ["use-std"] }
-arkhe-macros = { path = "../arkhe-macros", version = "0.13" }
-ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+arkhe-macros = { path = "../arkhe-macros", version = "0.14" }
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
 # ML-DSA 65 (NIST FIPS 204, Dilithium-3) — PQC Hybrid mandate, default
 # dep (no feature gate). Hybrid signing path = Ed25519 + ML-DSA 65 dual-sign,
 # AND-mode verify. Software-only signer; the PqcSigner / PqcVerifier
-# sealed-trait pair provides the HSM/KMS extension seam.
-ml-dsa = "=0.1.0-rc.9"
+# sealed-trait pair provides the HSM/KMS extension seam. `zeroize` scrubs
+# signing-key material on drop.
+ml-dsa = { version = "=0.1.0", features = ["zeroize"] }
+# Volatile secret-scrub for in-kernel seed copies (defence-in-depth; the
+# crypto crates' `zeroize` features cover the long-lived key types).
+zeroize = "1"
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["plotters", "cargo_bench_support"] }

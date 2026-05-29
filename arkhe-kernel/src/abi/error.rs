@@ -20,6 +20,11 @@ pub enum ArkheError {
     /// Caller lacks one or more required capability bits.
     CapabilityDenied,
 
+    /// A per-instance hard quota (e.g. `max_scheduled`) would be exceeded.
+    /// Returned by `Kernel::submit` as back-pressure rather than admitting
+    /// an unbounded enqueue.
+    QuotaExceeded,
+
     /// Domain-level error. The kernel does not interpret `code` or
     /// `payload`; they are an L1/L2 protocol. Payload is canonical bytes
     /// (CanonicalEncode discipline) so cross-replay determinism holds.
@@ -36,6 +41,7 @@ impl core::fmt::Display for ArkheError {
         match self {
             Self::InstanceNotFound => write!(f, "instance not found"),
             Self::CapabilityDenied => write!(f, "capability denied"),
+            Self::QuotaExceeded => write!(f, "quota exceeded"),
             Self::Domain { code, payload } => {
                 write!(
                     f,

@@ -3,7 +3,7 @@
 //! The kernel *reserves* bit positions for its own invariants
 //! (SYSTEM, ADMIN_UNLOAD, OBSERVER_REGISTER, INTROSPECT). The mapping
 //! of bits to L2 roles (admin, operator, tenant) is policy owned
-//! exclusively by L2. v0.13 reserves four bits; 60 more are free for
+//! exclusively by L2. v0.14 reserves four bits; 60 more are free for
 //! future kernel-reserved or L2-defined caps.
 
 use bitflags::bitflags;

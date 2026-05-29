@@ -17,13 +17,12 @@
 //! verifying keys (header) and per-record signatures persist.
 //! `Debug` for the `Ed25519` and `Hybrid` variants redacts signing keys.
 
-use ed25519_dalek::{
-    Signer as Ed25519SignerTrait, SigningKey, Verifier as Ed25519VerifierTrait, VerifyingKey,
-};
+use ed25519_dalek::{Signer as Ed25519SignerTrait, SigningKey, VerifyingKey};
 use ml_dsa::signature::{
     Keypair as MlDsaKeypairTrait, Signer as MlDsaSignerTrait, Verifier as MlDsaVerifierTrait,
 };
-use ml_dsa::{EncodedSignature, EncodedVerifyingKey, KeyGen, MlDsa65, B32};
+use ml_dsa::{EncodedSignature, EncodedVerifyingKey, MlDsa65, B32};
+use zeroize::Zeroize;
 
 // Sealed-trait marker (per docs/sealing-pattern-lineage.md,
 // A24 sealed-trait pattern). External crates cannot add new
@@ -109,10 +108,13 @@ pub struct SoftwareMlDsa65Signer {
 impl SoftwareMlDsa65Signer {
     /// Construct a signer deterministically from a 32-byte seed.
     /// FIPS 204 ML-DSA.KeyGen_internal — same seed yields same key pair.
-    pub fn from_seed(seed: [u8; 32]) -> Self {
+    pub fn from_seed(mut seed: [u8; 32]) -> Self {
         let xi: B32 = seed.into();
-        let signing_key = MlDsa65::from_seed(&xi);
+        let signing_key = ml_dsa::SigningKey::<MlDsa65>::from_seed(&xi);
         let verifying_key_cache = signing_key.verifying_key();
+        // Scrub the kernel's transient copy of the seed (the long-lived
+        // SigningKey zeroizes on drop via the ml-dsa `zeroize` feature).
+        seed.zeroize();
         Self {
             signing_key,
             verifying_key_cache,
@@ -236,12 +238,29 @@ pub enum SignatureClass {
     },
 }
 
+/// Domain-separation prefix bound into every WAL-record signature. Signing
+/// `WAL_SIG_DOMAIN || body_bytes` (not the bare body) scopes a signature to
+/// the WAL-record-signature domain, so the same key reused in another
+/// protocol cannot yield a cross-valid signature (defence-in-depth; the
+/// kernel itself never reuses the signing key). Applied symmetrically on
+/// the sign and verify sides; the version anchor advances with the epoch.
+const WAL_SIG_DOMAIN: &[u8] = b"arkhe-kernel v0.14 WAL record signature domain";
+
+#[inline]
+fn domain_separated(body_bytes: &[u8]) -> Vec<u8> {
+    let mut m = Vec::with_capacity(WAL_SIG_DOMAIN.len() + body_bytes.len());
+    m.extend_from_slice(WAL_SIG_DOMAIN);
+    m.extend_from_slice(body_bytes);
+    m
+}
+
 impl SignatureClass {
     /// Construct an Ed25519 class from a 32-byte secret seed.
     /// The verifying key is derived deterministically.
-    pub fn new_ed25519_from_secret(secret: [u8; 32]) -> Self {
+    pub fn new_ed25519_from_secret(mut secret: [u8; 32]) -> Self {
         let signing_key = SigningKey::from_bytes(&secret);
         let verifying_key = signing_key.verifying_key();
+        secret.zeroize();
         Self::Ed25519 {
             signing_key,
             verifying_key,
@@ -252,10 +271,15 @@ impl SignatureClass {
     /// secret seeds. Both keys derived deterministically from their
     /// respective 32-byte seeds. Use independent seeds (do not reuse
     /// the same seed for both schemes).
-    pub fn new_hybrid_from_secrets(ed25519_secret: [u8; 32], ml_dsa_seed: [u8; 32]) -> Self {
+    pub fn new_hybrid_from_secrets(
+        mut ed25519_secret: [u8; 32],
+        mut ml_dsa_seed: [u8; 32],
+    ) -> Self {
         let ed25519_signing_key = SigningKey::from_bytes(&ed25519_secret);
         let ed25519_verifying_key = ed25519_signing_key.verifying_key();
         let pqc_signer = Box::new(SoftwareMlDsa65Signer::from_seed(ml_dsa_seed));
+        ed25519_secret.zeroize();
+        ml_dsa_seed.zeroize();
         Self::Hybrid {
             ed25519_signing_key,
             ed25519_verifying_key,
@@ -294,11 +318,13 @@ impl SignatureClass {
     pub(crate) fn sign(&self, body_bytes: &[u8]) -> Option<[u8; 64]> {
         match self {
             Self::None => None,
-            Self::Ed25519 { signing_key, .. } => Some(signing_key.sign(body_bytes).to_bytes()),
+            Self::Ed25519 { signing_key, .. } => {
+                Some(signing_key.sign(&domain_separated(body_bytes)).to_bytes())
+            }
             Self::Hybrid {
                 ed25519_signing_key,
                 ..
-            } => Some(ed25519_signing_key.sign(body_bytes).to_bytes()),
+            } => Some(ed25519_signing_key.sign(&domain_separated(body_bytes)).to_bytes()),
         }
     }
 
@@ -314,8 +340,9 @@ impl SignatureClass {
                 pqc_signer,
                 ..
             } => {
-                let ed25519 = ed25519_signing_key.sign(body_bytes).to_bytes();
-                let pqc = pqc_signer.sign(body_bytes).ok()?;
+                let msg = domain_separated(body_bytes);
+                let ed25519 = ed25519_signing_key.sign(&msg).to_bytes();
+                let pqc = pqc_signer.sign(&msg).ok()?;
                 Some(HybridSignature { ed25519, pqc })
             }
             _ => None,
@@ -462,7 +489,7 @@ impl VerifierClass {
         match self {
             Self::Hybrid { ed25519, pqc } => {
                 Self::verify_ed25519(ed25519, body_bytes, sig)?;
-                pqc.verify(body_bytes, sig_pqc)
+                pqc.verify(&domain_separated(body_bytes), sig_pqc)
                     .map_err(|_| SignatureVerifyError::Mismatch)
             }
             _ => unreachable!("VerifierClass::verify_hybrid(): caller must guard with matches!"),
@@ -480,7 +507,9 @@ impl VerifierClass {
         let mut sig_bytes = [0u8; 64];
         sig_bytes.copy_from_slice(sig);
         let sig_obj = ed25519_dalek::Signature::from_bytes(&sig_bytes);
-        vk.verify(body_bytes, &sig_obj)
+        // `verify_strict` rejects non-canonical / small-order signatures —
+        // closes Ed25519 signature malleability (RFC 8032 §5.1 strict path).
+        vk.verify_strict(&domain_separated(body_bytes), &sig_obj)
             .map_err(|_| SignatureVerifyError::Mismatch)
     }
 }

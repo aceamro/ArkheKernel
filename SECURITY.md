@@ -63,11 +63,11 @@ Out of scope (please report to the relevant repository):
 
 ## Versioning
 
-The kernel ships under a single fixed version (currently v0.13). Security
-fixes land on the published version; downstream consumers pinning the
-exact version should re-pull after a security release. The version is
-intentionally not bumped for routine fixes — see `CHANGELOG.md` for the
-release narrative.
+The kernel ships under a pre-public version (currently v0.14). The
+version advances when a release changes the persisted wire format;
+cosmetic fixes keep the version. Downstream consumers pinning the exact
+version should re-pull after a security release — see `CHANGELOG.md` for
+the release narrative.
 
 ## Cryptographic acknowledgements
 

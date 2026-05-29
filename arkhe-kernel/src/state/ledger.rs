@@ -6,7 +6,7 @@
 //! the API is `pub(crate)` so unit tests and the apply pipeline both
 //! reach it directly.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -14,10 +14,17 @@ use crate::abi::{EntityId, TypeCode};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub(crate) struct ResourceLedger {
-    entity_bytes: BTreeMap<EntityId, u64>,
-    type_counts: BTreeMap<TypeCode, u32>,
+    /// Known entities (an entity may exist with zero attached components).
+    entities: BTreeSet<EntityId>,
+    /// Per-component declared `size` — the single accounting authority
+    /// (A21). Keyed by `(entity, type_code)`; `total_bytes`, per-entity
+    /// byte sums, and per-type counts all derive from this map, so a
+    /// `SetComponent` replace adjusts by the byte delta (never double-
+    /// counts) and a remove / despawn subtracts the exact stored size.
+    component_sizes: BTreeMap<(EntityId, TypeCode), u64>,
+    /// O(1) cache of `sum(component_sizes.values())` — hot-path read for
+    /// `memory_budget_bytes` enforcement in `runtime::kernel::step()`.
     total_bytes: u64,
-    total_entities: u32,
 }
 
 impl ResourceLedger {
@@ -38,70 +45,86 @@ impl ResourceLedger {
     #[cfg_attr(not(test), allow(dead_code))]
     #[inline]
     pub(crate) fn total_entities(&self) -> u32 {
-        self.total_entities
+        u32::try_from(self.entities.len()).unwrap_or(u32::MAX)
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn entity_bytes(&self, id: EntityId) -> u64 {
-        *self.entity_bytes.get(&id).unwrap_or(&0)
+        self.component_sizes
+            .range((id, TypeCode(0))..=(id, TypeCode(u32::MAX)))
+            .fold(0u64, |acc, (_, size)| acc.saturating_add(*size))
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn type_count(&self, tc: TypeCode) -> u32 {
-        *self.type_counts.get(&tc).unwrap_or(&0)
+        let n = self
+            .component_sizes
+            .keys()
+            .filter(|(_, t)| *t == tc)
+            .count();
+        u32::try_from(n).unwrap_or(u32::MAX)
     }
 
     /// Register a new entity with zero attached bytes. Returns true on
     /// fresh insertion, false if the entity was already present (idempotent).
     pub(crate) fn add_entity(&mut self, id: EntityId) -> bool {
-        if self.entity_bytes.insert(id, 0).is_none() {
-            self.total_entities = self.total_entities.saturating_add(1);
-            true
-        } else {
-            false
-        }
+        self.entities.insert(id)
     }
 
-    /// Remove an entity; returns the bytes that were attributed to it.
-    /// Caller is responsible for emitting per-component `remove_component`
-    /// calls in canonical apply order *before* this one if it wants
-    /// `type_counts` decrements; this method is the entity-row removal
-    /// (saturating-subtract from totals).
+    /// Remove an entity and cascade-drop every component it still held,
+    /// so a despawn cannot leave orphaned byte/type accounting behind.
+    /// Returns the total bytes that were attributed to the entity.
     pub(crate) fn remove_entity(&mut self, id: EntityId) -> u64 {
-        if let Some(bytes) = self.entity_bytes.remove(&id) {
-            self.total_bytes = self.total_bytes.saturating_sub(bytes);
-            self.total_entities = self.total_entities.saturating_sub(1);
-            bytes
-        } else {
-            0
+        if !self.entities.remove(&id) {
+            return 0;
         }
+        let keys: Vec<(EntityId, TypeCode)> = self
+            .component_sizes
+            .range((id, TypeCode(0))..=(id, TypeCode(u32::MAX)))
+            .map(|(k, _)| *k)
+            .collect();
+        let mut freed = 0u64;
+        for k in keys {
+            if let Some(size) = self.component_sizes.remove(&k) {
+                freed = freed.saturating_add(size);
+                self.total_bytes = self.total_bytes.saturating_sub(size);
+            }
+        }
+        freed
     }
 
-    /// Attach a component of `(tc, size)` to `entity`. Returns false if the
-    /// entity is unknown — apply ordering is the caller's responsibility.
+    /// Attach (or replace) a component of `(tc, size)` on `entity`. On a
+    /// replace, `total_bytes` is adjusted by the size *delta* — the prior
+    /// component's size is never double-counted and the type is not
+    /// re-counted. Returns false if the entity is unknown.
     pub(crate) fn add_component(&mut self, entity: EntityId, tc: TypeCode, size: u64) -> bool {
-        let Some(bytes) = self.entity_bytes.get_mut(&entity) else {
+        if !self.entities.contains(&entity) {
             return false;
-        };
-        *bytes = bytes.saturating_add(size);
-        self.total_bytes = self.total_bytes.saturating_add(size);
-        *self.type_counts.entry(tc).or_insert(0) += 1;
+        }
+        match self.component_sizes.insert((entity, tc), size) {
+            Some(old) if size >= old => {
+                self.total_bytes = self.total_bytes.saturating_add(size - old);
+            }
+            Some(old) => {
+                self.total_bytes = self.total_bytes.saturating_sub(old - size);
+            }
+            None => {
+                self.total_bytes = self.total_bytes.saturating_add(size);
+            }
+        }
         true
     }
 
-    /// Detach a component. Returns false if the entity is unknown.
-    /// `type_counts` entry is removed when its count reaches zero.
-    pub(crate) fn remove_component(&mut self, entity: EntityId, tc: TypeCode, size: u64) -> bool {
-        let Some(bytes) = self.entity_bytes.get_mut(&entity) else {
+    /// Detach a component. The size subtracted is the component's *stored*
+    /// declared size — the caller-supplied `_size` is ignored, so the
+    /// ledger is self-correcting and cannot be skewed by a mismatched
+    /// remove size. Returns false if the entity is unknown.
+    pub(crate) fn remove_component(&mut self, entity: EntityId, tc: TypeCode, _size: u64) -> bool {
+        if !self.entities.contains(&entity) {
             return false;
-        };
-        *bytes = bytes.saturating_sub(size);
-        self.total_bytes = self.total_bytes.saturating_sub(size);
-        if let Some(c) = self.type_counts.get_mut(&tc) {
-            *c = c.saturating_sub(1);
-            if *c == 0 {
-                self.type_counts.remove(&tc);
-            }
+        }
+        if let Some(old) = self.component_sizes.remove(&(entity, tc)) {
+            self.total_bytes = self.total_bytes.saturating_sub(old);
         }
         true
     }
@@ -223,5 +246,52 @@ mod tests {
         l.add_entity(e(1));
         l.remove_component(e(1), t(99), 50); // count was 0
         assert_eq!(l.type_count(t(99)), 0);
+    }
+
+    #[test]
+    fn set_component_replace_adjusts_by_delta_no_double_count() {
+        // Regression: re-setting the same (entity, type) must adjust by the
+        // size delta, not add the full size again, and must not re-count
+        // the type. Larger-then-smaller exercises both delta directions.
+        let mut l = ResourceLedger::new();
+        l.add_entity(e(1));
+        assert!(l.add_component(e(1), t(7), 100));
+        assert!(l.add_component(e(1), t(7), 400)); // replace, +300
+        assert_eq!(l.total_bytes(), 400);
+        assert_eq!(l.entity_bytes(e(1)), 400);
+        assert_eq!(l.type_count(t(7)), 1);
+        assert!(l.add_component(e(1), t(7), 50)); // replace, -350
+        assert_eq!(l.total_bytes(), 50);
+        assert_eq!(l.type_count(t(7)), 1);
+    }
+
+    #[test]
+    fn remove_entity_cascades_component_accounting() {
+        // Regression: despawn must drop every component's bytes AND type
+        // counts — no orphaned accounting after the entity is gone.
+        let mut l = ResourceLedger::new();
+        l.add_entity(e(1));
+        l.add_component(e(1), t(7), 100);
+        l.add_component(e(1), t(9), 50);
+        assert_eq!(l.total_bytes(), 150);
+        assert_eq!(l.type_count(t(7)), 1);
+        assert_eq!(l.type_count(t(9)), 1);
+        assert_eq!(l.remove_entity(e(1)), 150);
+        assert_eq!(l.total_bytes(), 0);
+        assert_eq!(l.total_entities(), 0);
+        assert_eq!(l.type_count(t(7)), 0);
+        assert_eq!(l.type_count(t(9)), 0);
+    }
+
+    #[test]
+    fn remove_component_uses_stored_size_not_caller_size() {
+        // Regression: a remove with a mismatched size must not skew the
+        // ledger — the stored size is authoritative.
+        let mut l = ResourceLedger::new();
+        l.add_entity(e(1));
+        l.add_component(e(1), t(7), 100);
+        assert!(l.remove_component(e(1), t(7), 999_999)); // bogus size ignored
+        assert_eq!(l.total_bytes(), 0);
+        assert_eq!(l.entity_bytes(e(1)), 0);
     }
 }

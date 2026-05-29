@@ -59,6 +59,13 @@ cargo run -p dice
   serialized WAL bytes themselves match across runs, runtimes, and CPU
   architectures. The chain hash (BLAKE3-keyed over postcard-canonical
   records) is the public invariant.
+- **Tamper-evident, anchored verification.** `Wal::verify_chain_anchored`
+  / `replay_into_verified` authenticate a WAL against a caller-supplied
+  trust anchor (minimum signature tier + pinned verifying keys + expected
+  chain tip) — rejecting signature downgrade, key substitution, and tail
+  truncation. The kernel supplies the mechanism; the caller owns the
+  trust-root policy. Untrusted snapshots gate the same way via
+  `KernelSnapshot::deserialize_verified`.
 - **Formal verification anchored.** TLA+ refinement modules cover chain
   hash determinism, state-machine refinement, replay invariance, and
   observer chain-non-affecting. Apalache typecheck is a CI gate, not a
@@ -107,7 +114,7 @@ a runtime bug.
   Replay against an incompatible header is a structural error, not a
   silent bit-rot.
 
-### Layer A — 8 catastrophic byte-identity invariants
+### Layer A — 7 catastrophic byte-identity invariants
 
 A small set of byte-level guarantees where any change invalidates every
 chain ever produced. Concrete examples:
@@ -134,9 +141,10 @@ Full axiom catalog (A1–A24 + S1) → [`book/`](book/).
 | Crate            | Version       | Role                                              |
 | :---             | :---          | :---                                              |
 | `ed25519-dalek`  | 2.x           | RFC 8032 reference impl (Tier 2 classical sig)    |
-| `ml-dsa`         | 0.1.0-rc.9    | NIST FIPS 204 ML-DSA 65 (Hybrid PQC sig)          |
+| `ml-dsa`         | =0.1.0        | NIST FIPS 204 ML-DSA 65 (Hybrid PQC sig)          |
 | `blake3`         | 1.x           | Keyed hash for WAL chain domain separation        |
 | `postcard`       | 1.x           | Canonical varint serde (deterministic encoding)   |
+| `zeroize`        | 1.x           | Signing-key + in-kernel seed scrub on drop        |
 
 `#![forbid(unsafe_code)]`, no `async`, no `std::thread`, no `HashMap`
 (only `BTreeMap` / `BTreeSet` for deterministic iteration).
@@ -177,7 +185,7 @@ not for first-time users.
   layer-DAG enforcement) on a shared `runtime_core` base. Apalache
   typecheck on every push.
 - **Kani harness suite** — 5 implementation-level proofs in the
-  sibling ArkheForge repository (published alongside v0.13):
+  sibling ArkheForge repository (published alongside v0.14):
   `authorize`, `dispatch`, `replay`, `memory_bounds_check`, and
   `hybrid_and_mode` (PQC AND-mode verify).
 - **Axiom-cite gate** — `formal/axiom-test-cite.toml` is a
@@ -217,9 +225,10 @@ reproduce on their own hardware to verify.
 
 ## Stability
 
-v0.13 — single fixed pre-public version. No version churn before
-external publish; subsequent corrections land on the same v0.13 line.
-Version 1.0 is intentionally never reached.
+v0.14 — pre-public. The kernel version advances only when a release
+changes the persisted wire format (the v0.13 → v0.14 ML-DSA
+stabilization being the first such advance); cosmetic fixes keep the
+version. Version 1.0 is intentionally never reached.
 
 ## Documentation
 

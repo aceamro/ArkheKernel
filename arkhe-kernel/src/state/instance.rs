@@ -172,6 +172,18 @@ impl Instance {
     }
 
     pub(crate) fn remove_entity(&mut self, id: EntityId) -> Option<EntityMeta> {
+        // Despawn cascades: drop every component the entity still holds so
+        // no orphaned `(entity, *)` rows survive in `components`. The
+        // ledger mirrors this via its own cascade in `ResourceLedger::
+        // remove_entity`, keeping the two maps consistent.
+        let orphaned: Vec<(EntityId, TypeCode)> = self
+            .components
+            .range((id, TypeCode(0))..=(id, TypeCode(u32::MAX)))
+            .map(|(k, _)| *k)
+            .collect();
+        for k in orphaned {
+            self.components.remove(&k);
+        }
         self.entities.remove(&id)
     }
 

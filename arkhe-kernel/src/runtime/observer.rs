@@ -34,7 +34,7 @@ struct ObserverSlot {
 pub(crate) struct ObserverRegistry {
     slots: BTreeMap<ObserverHandle, ObserverSlot>,
     evicted: BTreeSet<ObserverHandle>,
-    next_handle: u16,
+    next_handle: u64,
 }
 
 impl ObserverRegistry {

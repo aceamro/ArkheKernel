@@ -49,8 +49,55 @@ impl KernelSnapshot {
     }
 
     /// Decode from canonical postcard bytes.
+    ///
+    /// After decoding, structural invariants are validated (currently the
+    /// scheduler three-table index consistency of every captured instance)
+    /// so a corrupt or tampered snapshot is rejected here rather than
+    /// triggering a latent panic during a later replay/step. This trusts
+    /// the *provenance* of the bytes — for an untrusted source, gate them
+    /// through [`deserialize_verified`](Self::deserialize_verified) first.
     pub fn deserialize(bytes: &[u8]) -> Result<Self, SnapshotError> {
-        postcard::from_bytes(bytes).map_err(|e| SnapshotError::DeserializeFailed(format!("{}", e)))
+        let snap: Self = postcard::from_bytes(bytes)
+            .map_err(|e| SnapshotError::DeserializeFailed(format!("{}", e)))?;
+        snap.validate_structure()?;
+        Ok(snap)
+    }
+
+    /// Decode from canonical postcard bytes, first verifying their
+    /// integrity against a caller-supplied BLAKE3 digest obtained
+    /// out-of-band (recorded when the snapshot was taken, or distributed
+    /// over a trusted channel). Use this for snapshots from an untrusted
+    /// source: it closes the gap whereby [`deserialize`](Self::deserialize)
+    /// alone trusts whatever bytes it is handed. The kernel supplies the
+    /// *mechanism* (digest comparison); the caller owns the *policy* of
+    /// which digest to trust.
+    pub fn deserialize_verified(
+        bytes: &[u8],
+        expected_digest: &[u8; 32],
+    ) -> Result<Self, SnapshotError> {
+        if blake3::hash(bytes).as_bytes() != expected_digest {
+            return Err(SnapshotError::IntegrityMismatch);
+        }
+        Self::deserialize(bytes)
+    }
+
+    /// BLAKE3 digest of a snapshot's canonical bytes — the value a caller
+    /// records out-of-band to later verify integrity via
+    /// [`deserialize_verified`](Self::deserialize_verified).
+    pub fn digest(bytes: &[u8]) -> [u8; 32] {
+        *blake3::hash(bytes).as_bytes()
+    }
+
+    /// Validate structural invariants of every captured instance (scheduler
+    /// three-table index consistency). Rejects a corrupt/tampered snapshot
+    /// before it can drive a latent panic during replay/step.
+    fn validate_structure(&self) -> Result<(), SnapshotError> {
+        for (id, inst) in &self.instances {
+            inst.scheduler
+                .validate()
+                .map_err(|reason| SnapshotError::Inconsistent(format!("instance {:?}: {}", id, reason)))?;
+        }
+        Ok(())
     }
 
     /// Number of instances captured.
@@ -90,6 +137,12 @@ pub enum SnapshotError {
     SerializeFailed(String),
     /// Postcard refused to decode the bytes.
     DeserializeFailed(String),
+    /// The bytes decoded, but a structural invariant (e.g. scheduler index
+    /// consistency) did not hold — the snapshot is corrupt or tampered.
+    Inconsistent(String),
+    /// The bytes' BLAKE3 digest did not match the caller-supplied expected
+    /// digest — the integrity/authenticity check failed.
+    IntegrityMismatch,
 }
 
 impl core::fmt::Display for SnapshotError {
@@ -97,6 +150,8 @@ impl core::fmt::Display for SnapshotError {
         match self {
             Self::SerializeFailed(m) => write!(f, "snapshot serialize failed: {}", m),
             Self::DeserializeFailed(m) => write!(f, "snapshot deserialize failed: {}", m),
+            Self::Inconsistent(m) => write!(f, "snapshot structural validation failed: {}", m),
+            Self::IntegrityMismatch => write!(f, "snapshot integrity digest mismatch"),
         }
     }
 }
@@ -274,6 +329,29 @@ mod tests {
         let report = k2.step(Tick(0), CapabilityMask::SYSTEM);
         assert_eq!(report.actions_executed, 1);
         assert_eq!(report.effects_applied, 0);
+    }
+
+    #[test]
+    fn snapshot_deserialize_verified_checks_digest() {
+        let (k, _) = boot_with_state(&[1, 2]);
+        let bytes = k.snapshot().serialize().unwrap();
+        let digest = KernelSnapshot::digest(&bytes);
+        // Correct digest → ok.
+        assert!(KernelSnapshot::deserialize_verified(&bytes, &digest).is_ok());
+        // Tampered digest → IntegrityMismatch (no decode attempted).
+        let mut bad = digest;
+        bad[0] ^= 0xFF;
+        assert!(matches!(
+            KernelSnapshot::deserialize_verified(&bytes, &bad),
+            Err(SnapshotError::IntegrityMismatch),
+        ));
+        // Tampered bytes under the original digest → IntegrityMismatch.
+        let mut bad_bytes = bytes.clone();
+        bad_bytes[0] ^= 0xFF;
+        assert!(matches!(
+            KernelSnapshot::deserialize_verified(&bad_bytes, &digest),
+            Err(SnapshotError::IntegrityMismatch),
+        ));
     }
 
     #[test]

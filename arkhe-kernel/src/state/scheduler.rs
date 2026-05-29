@@ -92,13 +92,16 @@ impl Scheduler {
         type_code: TypeCode,
         bytes: Vec<u8>,
     ) -> ScheduledActionId {
-        self.next_id += 1;
+        // Saturating (never wraps to 0), matching the kernel-wide A12
+        // panic-free arithmetic discipline; the NonZeroU64 below therefore
+        // cannot fail even after astronomically many schedules.
+        self.next_id = self.next_id.saturating_add(1);
         let id = ScheduledActionId(
             NonZeroU64::new(self.next_id).expect("next_id incremented before use; never zero"),
         );
 
         let seq = self.next_seq;
-        self.next_seq += 1;
+        self.next_seq = self.next_seq.saturating_add(1);
 
         let key = SchedKey { at, seq, id };
         let entry = ScheduledEntry {
@@ -136,7 +139,7 @@ impl Scheduler {
         }
 
         let seq = self.next_seq;
-        self.next_seq += 1;
+        self.next_seq = self.next_seq.saturating_add(1);
 
         let key = SchedKey { at, seq, id };
         let entry = ScheduledEntry {
@@ -217,6 +220,62 @@ impl Scheduler {
             }
         }
         Some(entry)
+    }
+
+    /// Validate three-table index consistency. Run after a snapshot decode
+    /// so a corrupt or tampered snapshot is rejected up front rather than
+    /// triggering a latent panic in `cancel` / `pop_due` (both rely on
+    /// `ready`/`by_id` agreement). Returns `Err(reason)` on any mismatch.
+    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+        // `ready` and `by_id` must be exact inverses.
+        if self.ready.len() != self.by_id.len() {
+            return Err("scheduler ready/by_id size mismatch");
+        }
+        for (key, entry) in &self.ready {
+            if entry.id != key.id {
+                return Err("scheduler entry id does not match its key");
+            }
+            match self.by_id.get(&entry.id) {
+                Some(k) if *k == *key => {}
+                _ => return Err("scheduler by_id does not map back to the ready key"),
+            }
+        }
+        // `by_actor` ids must exist in `by_id` and reference the right actor.
+        for (actor, ids) in &self.by_actor {
+            if ids.is_empty() {
+                return Err("scheduler by_actor holds an empty actor set");
+            }
+            for id in ids {
+                let Some(key) = self.by_id.get(id) else {
+                    return Err("scheduler by_actor references an unknown id");
+                };
+                match self.ready.get(key) {
+                    Some(entry) if entry.actor == Some(*actor) => {}
+                    _ => return Err("scheduler by_actor actor mismatch"),
+                }
+            }
+        }
+        // Reverse direction: every ready entry that names an actor MUST be
+        // indexed under by_actor[actor], else cancel_by_actor would silently
+        // miss it (the forward check above alone leaves that gap).
+        for entry in self.ready.values() {
+            if let Some(actor) = entry.actor {
+                match self.by_actor.get(&actor) {
+                    Some(set) if set.contains(&entry.id) => {}
+                    _ => return Err("scheduler ready entry missing from its by_actor index"),
+                }
+            }
+        }
+        // Monotonic counters must dominate every live key.
+        for key in self.ready.keys() {
+            if key.seq >= self.next_seq {
+                return Err("scheduler next_seq not monotonic over live keys");
+            }
+            if key.id.get() > self.next_id {
+                return Err("scheduler next_id not monotonic over live ids");
+            }
+        }
+        Ok(())
     }
 
     // Test-only observability accessors. Production introspection wiring
@@ -379,5 +438,30 @@ mod tests {
             out
         }
         assert_eq!(run(), run());
+    }
+
+    #[test]
+    fn validate_accepts_consistent_scheduler() {
+        let mut s = Scheduler::new();
+        s.schedule(Tick(5), Some(EntityId::new(1).unwrap()), p(), tc(), vec![1]);
+        s.schedule(Tick(3), None, p(), tc(), vec![2]);
+        s.schedule(Tick(5), Some(EntityId::new(1).unwrap()), p(), tc(), vec![3]);
+        assert!(s.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_broken_ready_by_id_bijection() {
+        let mut s = Scheduler::new();
+        s.schedule(Tick(5), None, p(), tc(), vec![1]);
+        s.by_id.clear(); // ready holds an entry with no by_id mapping
+        assert!(s.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_missing_by_actor_index() {
+        let mut s = Scheduler::new();
+        s.schedule(Tick(5), Some(EntityId::new(1).unwrap()), p(), tc(), vec![1]);
+        s.by_actor.clear(); // actor-owned entry no longer indexed
+        assert!(s.validate().is_err());
     }
 }

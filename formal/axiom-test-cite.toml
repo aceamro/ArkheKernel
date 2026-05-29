@@ -14,7 +14,7 @@
 schema_version = 1
 mc_axiom_count = 12
 formal_method_anchors = "formal/tla-plus/{runtime_core,cr1,cr2,cr3,cr4,r4}.tla"
-cycle = "v0.13"
+cycle = "v0.14"
 
 # ============================================================
 # CR-N anchors — Cryptographic refinement primitive class siblings
@@ -50,9 +50,9 @@ note = "no axiom anchor; sealed-trait safeguard + private module bound = securit
 # ============================================================
 
 [layer_a_items]
-total_items = 8
+total_items = 7
 formal_anchored = 5
-type_or_doc_only = 3
+type_or_doc_only = 2
 
 [layer_a_items.item_1]
 name = "DOMAIN_CTX literal"
@@ -71,6 +71,16 @@ literal_diff = "FROM b\"arkhe-kernel v0.9 WAL chain domain separation context (R
 chain_invalidation = "Pre-escalation WALs (pre-v0.13) NOT replayable. New chain epoch from v0.13. blake3::derive_key(DOMAIN_CTX, world_id) input bytes 변경 → derived chain key 변경 → 모든 prior chain hash mismatch. Acceptable per user directive (pre-public absorption, single-fix forward-only)."
 verify_chain = "byte-level wire format diff + L879 EXPECTED test literal regen (BLAKE3 output) + ci/l0-baseline-hashes.txt regen (DOMAIN_CTX-derived hash) + axiom-cite gate re-run + workflow-3 9-step + step 11 N/A (TLA+ untouched) + step 12 N/A (Kani untouched)"
 spec_anchor = "user directive 2026-05-03 (verbatim consent)"
+
+[layer_a_items.item_1.escalation_event_2]
+date = "2026-05-29"
+commit_hash = "pending (uncommitted working tree)"
+consent = "user directive 2026-05-29 (verbatim): ml-dsa 라이브러리 업데이트 + 커널 0.14 버전업 + 발견된 모든 문제·불일치 교정. full-epoch-advance option selected (all 4 version axes → 0.14)."
+rationale = "v0.13 → v0.14 epoch advance accompanying the ml-dsa 0.1.0-rc.9 → 0.1.0 (NIST FIPS 204 final) stabilization. Supersedes the prior 'single fixed v0.13, no version bumps' directive: the kernel version now advances when a release changes the persisted wire format."
+literal_diff = "FROM b\"arkhe-kernel v0.13 WAL chain domain separation context\" TO b\"arkhe-kernel v0.14 WAL chain domain separation context\""
+chain_invalidation = "v0.13-epoch WALs NOT replayable under v0.14 (new chain epoch). blake3::derive_key(DOMAIN_CTX, world_id) input bytes 변경 → derived chain key 변경 → 모든 prior-epoch chain hash mismatch. Acceptable per user directive (pre-public, forward-only)."
+verify_chain = "DOMAIN_CTX EXPECTED literal regen + domain_ctx_byte_identity_blake3 FROZEN_HEX regen + CURRENT_KERNEL_SEMVER (0,13,0)→(0,14,0) + ABI_VERSION (0,13)→(0,14) + ci/l0-baseline-hashes.txt regen + axiom-cite gate PASS + cargo test (235) + clippy --all-targets clean"
+spec_anchor = "user directive 2026-05-29 (verbatim consent)"
 
 [layer_a_items.item_2]
 name = "InvariantLifetime variance"
@@ -121,8 +131,18 @@ verify_chain = "byte-level wire format diff + cr1 + cr3 comment block update + a
 spec_anchor = "L0 chain-input invariance preserved across the PQC envelope addition (chain-input bytes unchanged, additive wire-format slots only)"
 
 [layer_a_items.item_7.dual_layer_protection]
-sub_a_invariant = "WalRecordBody (10-field chain hash input) — escalation pathway NEVER applied. ChainHashFn upstream determinism. A1 + E14 anchored."
-sub_b_relaxed = "WalRecord wire format (12->13 fields) — RELAXED monotone append-only across PQC introduction. Hybrid PQC signatures (signature_pqc=Some) are append-only; rollback 0."
+sub_a_invariant = "WalRecordBody (11-field chain hash input as of v0.14; was 10-field) — escalation pathway applied ONCE at v0.14 (actor field, see escalation_event_2). ChainHashFn upstream determinism. A1 + E14 anchored."
+sub_b_relaxed = "WalRecord wire format (12->13 fields at PQC introduction; +actor at v0.14) — RELAXED monotone append-only. Hybrid PQC signatures (signature_pqc=Some) and the actor field are append-only; rollback 0."
+
+[layer_a_items.item_7.escalation_event_2]
+date = "2026-05-29"
+commit_hash = "pending (uncommitted working tree)"
+consent = "user directive 2026-05-29 (verbatim): 발견된 모든 문제·불일치 교정."
+rationale = "Bug-hunt finding #1 (HIGH, A1 D1-Total): the submit-time actor (Option<EntityId> feeding ActionContext::actor in compute()) was dropped from the WAL record, so a module branching on ctx.actor diverged on replay (actor=None). Fix: persist actor in WalRecord AND WalRecordBody so it is covered by the chain hash."
+layout_change = "WalRecordBody chain-hash input 10 → 11 fields (actor inserted after principal); WalRecord gains the matching field. Applies the escalation pathway to the item_7 sub_a invariant (previously 'NEVER applied') — authorized under the v0.14 epoch."
+invariant_preserved = "A1 bit-identical replay now HOLDS for actor-reading modules (it did not before). v0.13-epoch WALs are a separate epoch regardless (see item_1.escalation_event_2)."
+verify_chain = "3 record-format frozen-hex regens (wal_record_postcard_layout_byte_identity + chain_hash_unchanged_for_ed25519_records + wal_record_postcard_field_order_baseline) + new wal_record_persists_actor_for_replay_determinism test + replay_records threads rec.actor + ci/l0-baseline-hashes.txt regen + cargo test (235) PASS + dice D1-Total replay PASS"
+spec_anchor = "user directive 2026-05-29 (verbatim consent); bug-hunt finding #1"
 
 # ============================================================
 # E1-E15 ↔ TLA+ INV ↔ kernel impl test cite
@@ -440,7 +460,7 @@ tla_module = "formal/tla-plus/cr3_replay_determinism.tla"
 # Formal verification result inventory
 # ============================================================
 [formal_verification_inventory]
-cycle = "v0.13"
+cycle = "v0.14"
 formal_modules = 6
 tla_invs = 17
 tla_theorems = 2

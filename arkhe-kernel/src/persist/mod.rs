@@ -12,9 +12,10 @@ pub mod signature;
 pub mod snapshot;
 pub mod wal;
 
-pub use replay::{replay_into, ReplayError, ReplayReport};
+pub use replay::{replay_into, replay_into_verified, ReplayError, ReplayReport};
 pub use signature::SignatureClass;
 pub use snapshot::{KernelSnapshot, SnapshotError};
 pub use wal::{
-    AuthDecisionAnnotation, TypeRegistryPin, Wal, WalError, WalHeader, WalRecord, WalWriter,
+    AuthDecisionAnnotation, SignatureTier, TrustAnchor, TypeRegistryPin, Wal, WalError, WalHeader,
+    WalRecord, WalWriter,
 };
