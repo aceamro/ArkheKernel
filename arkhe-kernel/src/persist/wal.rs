@@ -488,7 +488,7 @@ impl Wal {
 
     /// Verify the chain AND authenticate it against a caller-supplied
     /// [`TrustAnchor`]. Use this when the WAL bytes are untrusted (a
-    /// tampered log or a peer's snapshot): beyond [`verify_chain`]'s
+    /// tampered log or a peer's snapshot): beyond [`Self::verify_chain`]'s
     /// integrity checks it rejects a tier downgrade below `anchor
     /// .min_tier`, a verifying-key substitution (header key != the
     /// anchored key), a `manifest_digest` mismatch, and a tail truncation
