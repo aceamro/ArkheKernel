@@ -2,7 +2,6 @@
 
 > **What this is:** an orientation map for AI agents (and new humans) working in this repo.
 > It is the entry point: read it before reading code, and **read §3 before editing anything**.
-> **🇰🇷 한 줄:** AI 에이전트용 길잡이 — 코드보다 이 파일을 먼저, **수정 전엔 반드시 §3 먼저** 읽으세요.
 
 ArkheKernel is a **deterministic Rust microkernel**: identical inputs always produce
 identical state *and* identical persisted bytes (a BLAKE3-keyed Write-Ahead-Log chain),
@@ -16,14 +15,15 @@ This file is **navigation metadata only** — it lives outside the kernel source
 
 ## 0. How to use this file (agent prime directive)
 
-> **🇰🇷 한 줄:** 길 찾기는 §4, 수정 금지선은 §3, 커밋 전엔 §6 — 이 순서가 안전합니다.
+> **In one line:** find things in §4, read §3 before editing, run §6 before committing.
 
 1. **Orient** — read §1 (what it is) and §2 (the layer DAG mental model).
 2. **Locate** — use §4 (file → role map) to find where a thing lives. Don't grep blindly.
 3. **Before editing** — read §3 (DO NOT TOUCH). Most of this kernel is byte-frozen; an
    innocent edit (even adding a comment to an L0 file) breaks a CI gate or invalidates
    every audit chain ever produced.
-4. **Understand the flow** — §5 traces one action from submission to verified replay.
+4. **Understand the flow** — §5 traces one action from submission to verified replay, and
+   shows how to write your own action/component.
 5. **Before committing** — run the §6 gate checklist. CI runs the same gates.
 6. **Stuck on a word?** — §7 is a glossary of ~60 project terms.
 
@@ -36,7 +36,7 @@ This file is **navigation metadata only** — it lives outside the kernel source
 
 ## 1. What ArkheKernel is
 
-> **🇰🇷 한 줄:** 결정론적 상태기계 — 같은 입력 → 같은 상태 + **같은 바이트** WAL, PQC 봉인 감사체인.
+> **In one line:** a pure state machine where the same inputs yield the same state *and* the same WAL bytes, with post-quantum sealed audit chains.
 
 - **Pure state machine.** `Kernel::step()` applies scheduled actions; given the same config
   + canonical input sequence + manifest digest, the serialized WAL bytes are identical
@@ -56,7 +56,7 @@ This file is **navigation metadata only** — it lives outside the kernel source
 
 ## 2. Layer DAG & mental model
 
-> **🇰🇷 한 줄:** `abi → state → runtime → persist` 단방향 DAG. 역방향 import = 빌드 실패(R4-X).
+> **In one line:** four strata, `abi → state → runtime → persist`, one-way; a reverse import does not compile (R4-X).
 
 ```text
 abi  ───►  state  ───►  runtime  ───►  persist
@@ -80,10 +80,7 @@ compile — that is why `apply_stage`/`discard_stage` live in `runtime/apply.rs`
 
 ## 3. ⛔ DO NOT TOUCH — editing hazards (READ BEFORE ANY EDIT)
 
-> **🇰🇷 한 줄:** L0 소스는 SHA-256으로 봉인됨 — 주석 한 줄도 게이트를 깨고, byte-identity 표면은 모든 과거 체인을 무효화합니다.
-
-This kernel is mostly **frozen at the byte level**. The hazards below are not advice; they
-are gates that fail your build or, worse, silently invalidate existing audit chains.
+> **In one line:** most of the kernel is byte-frozen — these are gates that fail your build or silently invalidate every audit chain.
 
 ### 3.1 L0 baseline seal (the broadest gate)
 
@@ -125,8 +122,10 @@ the above. If you change a frozen surface, these tests fail loudly — that is t
 
 ### 3.4 Type-level invariants you can break by accident
 
-- **`Kernel: !Sync`** (`runtime/kernel.rs:35-41`) via `PhantomData<Rc<()>>` — single-thread
-  is proven at the type level (A2). Do not add `Send`/`Sync` to make something compile.
+- **Single-thread (A2)** — the kernel is meant to be driven by one thread: it declares
+  `Kernel: !Sync` (`runtime/kernel.rs:32`), holds no locks, and has no `async`. This is a
+  design invariant (no internal locking, single owner), **not** a `PhantomData` field on the
+  struct. Do not add `Send`/`Sync` impls or interior mutability to make something compile.
 - **GhostCell brand** — `InvariantLifetime = PhantomData<fn(&'i ()) -> &'i ()>`
   (`state/authz.rs:20`, `state/scope.rs:20`) prevents reusing an `Effect` across instances
   at compile time (A19).
@@ -149,7 +148,7 @@ are not replayable under a new-epoch kernel.
 
 ## 4. File → role map (31 kernel files + the macros crate)
 
-> **🇰🇷 한 줄:** "X가 어디 있나" — grep 전에 이 표. 각 파일 한 줄 역할.
+> **In one line:** find where a thing lives before you grep.
 
 ### crate root
 | File | Role |
@@ -169,7 +168,7 @@ are not replayable under a new-epoch kernel.
 | File | Role |
 | --- | --- |
 | `state/mod.rs` | re-export hub |
-| `state/traits.rs` | sealed `Component` / `ActionDeriv` / `ActionCompute` / `Action` / `Event` |
+| `state/traits.rs` | sealed `Component` / `ActionDeriv` / `ActionCompute` / `Action` / `Event` (`canonical_bytes()`, `approx_size()`, `TYPE_CODE`, `SCHEMA_VERSION`) |
 | `state/op.rs` | `Op` enum — kernel-level effect intents (Spawn/Despawn/SetComponent/EmitEvent/Schedule/Signal) |
 | `state/context.rs` | `ActionContext` — read-only instance view passed to `compute()` |
 | `state/instance.rs` | `Instance` — per-instance state container (entities, components, scheduler, ledger) |
@@ -184,14 +183,14 @@ are not replayable under a new-epoch kernel.
 | File | Role |
 | --- | --- |
 | `runtime/mod.rs` | re-export hub |
-| `runtime/kernel.rs` | `Kernel` orchestrator: constructors, `submit`, `step` (commit-or-rollback), `force_unload`, `snapshot` |
+| `runtime/kernel.rs` | `Kernel` orchestrator: constructors, `submit`, `step` (commit-or-rollback), `register_action`, `force_unload`, `snapshot` |
 | `runtime/dispatch.rs` | `dispatch()` — translate an authorized `Effect` into `StepStage` deltas (no `Instance` mutation) |
 | `runtime/apply.rs` | `apply_stage` / `discard_stage` — commit (10 buckets, strict order) or rollback |
 | `runtime/stage.rs` | `StepStage` — 10-bucket transactional staging buffer (COW) |
 | `runtime/event.rs` | `KernelEvent` enum + `EventMask` bitflags + `ObserverHandle` |
 | `runtime/observer.rs` | `KernelObserver` trait + panic-resilient registry (first-panic eviction, A22) |
-| `runtime/registry.rs` | `ActionRegistry` — `TypeCode` → deserializer fn-pointer table |
-| `runtime/view.rs` | `InstanceView<'a>` — read-only borrowed projection (no write methods) |
+| `runtime/registry.rs` | `ActionRegistry` — `TypeCode` → deserializer fn-pointer table (populated by `register_action`) |
+| `runtime/view.rs` | `InstanceView<'a>` — read-only borrowed projection. Accessors: `entity_meta(id)`, `component(entity, type_code) -> Option<&Bytes>`, `entities()`, `components_by_type(type_code)`. No write methods |
 
 ### persist/ — WAL chain, signing, snapshot, replay (byte-identity epicenter)
 | File | Role |
@@ -205,19 +204,22 @@ are not replayable under a new-epoch kernel.
 ### arkhe-macros/ (separate crate, L0)
 | File | Role |
 | --- | --- |
-| `arkhe-macros/src/lib.rs` | `#[derive(ArkheAction/ArkheComponent/ArkheEvent)]` + `#[arkhe(type_code, schema_version)]` |
+| `arkhe-macros/src/lib.rs` | `#[derive(ArkheAction/ArkheComponent/ArkheEvent)]` + `#[arkhe(type_code, schema_version)]`; lines 129–192 pin canonical byte-emission (Layer A item 3) |
 
 ---
 
 ## 5. Action lifecycle (submit → verified replay)
 
-> **🇰🇷 한 줄:** 액션 하나가 제출→스케줄→인가→예산검사→스테이지 적용→WAL 체인해시·서명→검증/리플레이까지 18단계.
+> **In one line:** one action's path from `submit()` to a bit-identical replay proof.
+
+An action must be **registered before it can be submitted**: call
+`kernel.register_action::<A>()` once, then `submit()`/`step()` may run it.
 
 | # | Step | Where |
 | --- | --- | --- |
 | 1 | `Kernel::submit(...)` validates instance + `max_scheduled` quota, enqueues into scheduler | `kernel.rs:285-317` |
 | 2 | `Kernel::step(now, caps)` pops one due action per instance, **ascending `InstanceId`** (A23) | `kernel.rs:321-333` |
-| 3 | look up `TypeCode` in `ActionRegistry`, deserialize action bytes | `kernel.rs:336-344` |
+| 3 | look up `TypeCode` in `ActionRegistry` (from `register_action`), deserialize action bytes | `kernel.rs:336-344` |
 | 4 | build `ActionContext` (actor, tick, instance) | `kernel.rs:346-348` |
 | 5 | `action.compute_dyn(&ctx)` → `Vec<Op>` (pure, deterministic) | `kernel.rs:348` |
 | 6 | wrap each `Op` in `Effect<Unverified>`, call `authorize(caps, eff)` | `kernel.rs:356-363` |
@@ -239,11 +241,56 @@ are not replayable under a new-epoch kernel.
 
 Run the end-to-end proof: `cargo run -p dice` (prints `✓ A1 D1-Total verified`).
 
+### Adding your own Action (and attaching a Component)
+
+The **tested** canonical Action skeleton lives in `arkhe-kernel/src/lib.rs` / `README.md` as
+a compiled doctest — copy that as your starting point. A kernel `ActionCompute::compute`
+returns `Vec<Op>`. To attach and later read a component:
+
+```rust
+use arkhe_kernel::abi::{EntityId, Principal, TypeCode};
+use arkhe_kernel::state::{ActionCompute, ActionContext, Component, Op};
+use arkhe_kernel::{ArkheAction, ArkheComponent};
+use bytes::Bytes;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, ArkheComponent)]
+#[arkhe(type_code = 10, schema_version = 1)]
+struct Score { points: u32 }
+
+#[derive(Serialize, Deserialize, ArkheAction)]
+#[arkhe(type_code = 1, schema_version = 1)]
+struct Spawn;
+
+impl ActionCompute for Spawn {
+    fn compute(&self, _ctx: &ActionContext) -> Vec<Op> {
+        let e = EntityId::new(1).unwrap();
+        let score = Score { points: 7 };
+        vec![
+            Op::SpawnEntity { id: e, owner: Principal::System },
+            Op::SetComponent {
+                entity: e,
+                type_code: Score::TYPE_CODE,            // from the derive
+                bytes: Bytes::from(score.canonical_bytes()), // Component → canonical postcard bytes
+                size: score.approx_size() as u64,       // for the memory-budget ledger
+            },
+        ]
+    }
+}
+// After register_action::<Spawn>() + submit + step, read it back:
+//   let view = kernel.instance_view(inst).unwrap();
+//   let raw: Option<&Bytes> = view.component(EntityId::new(1).unwrap(), Score::TYPE_CODE);
+//   let score: Score = postcard::from_bytes(raw.unwrap()).unwrap();
+```
+
+`type_code`/`schema_version` are byte-identity surfaces (§3.2) — pick a fresh `type_code` and
+never change a published one. The compute body must be deterministic (no clock/RNG/I/O).
+
 ---
 
 ## 6. ✅ Verify before you commit
 
-> **🇰🇷 한 줄:** CI가 돌리는 5게이트를 로컬에서 그대로 — `scripts/pre-publish-verify.sh` 하나로 전부.
+> **In one line:** run the five gates CI runs — `scripts/pre-publish-verify.sh` runs all of them.
 
 CI enforces five gates in this order (mirrored by `scripts/pre-publish-verify.sh`):
 
@@ -267,6 +314,10 @@ apalache-mc typecheck formal/tla-plus/*.tla
 scripts/pre-publish-verify.sh
 ```
 
+`arkhe-kernel` has **no optional cargo features** — `--all-features` equals the default build,
+and ML-DSA 65 signing is always compiled in (the None/Ed25519/Hybrid tier is chosen at
+`Kernel::new_with_wal_signed(...)`, not at compile time).
+
 If gate 3 fails because you *intentionally* changed L0, stop — that needs the §3.5
 escalation, not a baseline bump. `ci/scripts-baseline-hashes.txt` also pins the verify
 scripts themselves against tampering. Dependency policy is in `deny.toml` (crates.io only,
@@ -276,7 +327,7 @@ license allowlist, CVE deny).
 
 ## 7. Glossary (~60 terms)
 
-> **🇰🇷 한 줄:** 모르는 용어가 막히는 1순위 원인 — 한 줄 정의 모음.
+> **In one line:** one-line definitions for the project's terms — the #1 thing a newcomer gets stuck on.
 
 **Layers & structure**
 - **L0** — the kernel foundation: `arkhe-kernel/src/**` + `arkhe-macros/src/lib.rs`; baseline-sealed, lint-exempt.
@@ -299,7 +350,7 @@ license allowlist, CVE deny).
 - **Sealed trait** — a trait only crate-internal/derive code may implement (`_sealed::Sealed` super-trait).
 - **ActionDeriv** — macro-emitted half of `Action` (carries `TYPE_CODE`/`SCHEMA_VERSION`).
 - **ActionCompute** — user-written half: `compute(&ctx) -> Vec<Op>`, must be pure (A11).
-- **Op** — a kernel effect intent (SpawnEntity, SetComponent, ScheduleAction, EmitEvent, SendSignal…).
+- **Op** — a kernel effect intent. Variants: `SpawnEntity` (register entity), `DespawnEntity` (remove + cascade components), `SetComponent` (attach/replace component bytes), `RemoveComponent` (detach), `EmitEvent` (domain event), `ScheduleAction` (enqueue for a future tick), `SendSignal` (cross-instance). See `state/op.rs`.
 - **Effect<'i, S>** — an `Op` branded with instance + principal + an `AuthState` tag.
 - **AuthState** — sealed typestate tag: `Unverified` or `Authorized`.
 - **authorize()** — the *sole* gate producing `Effect<Authorized>`; the single audited permission check.
@@ -311,16 +362,18 @@ license allowlist, CVE deny).
 - **QuotaReductionPolicy** — how a parent quota cut below child usage is handled (Reject / GrandfatherExisting / ThrottleProportional).
 - **EntityMeta** — per-entity metadata (owner principal at spawn + created tick).
 - **InstanceConfig** — caller config: capabilities, quotas, memory budget, parent, reduction policy.
+- **Component::canonical_bytes() / approx_size()** — serialize a component to canonical postcard bytes / its ledger size estimate (used to build `Op::SetComponent`).
 
 **Runtime**
-- **Kernel** — the `!Sync` single-thread orchestrator.
+- **Kernel** — the single-thread orchestrator (`!Sync`, A2).
 - **StepStage** — 10-bucket transactional buffer; committed by `apply_stage` or dropped on rollback.
 - **dispatch** — turns an authorized `Effect` into `StepStage` deltas (no direct `Instance` mutation).
 - **Commit-or-rollback** — capability deny → full rollback; budget/quota deny → per-Op skip.
+- **register_action** — registers an action type's deserializer; **required before `submit`**.
 - **KernelObserver / first-panic eviction (A22)** — observers receive events; a panicking observer is caught and evicted permanently.
 - **EventMask** — bitflag filter, one bit per `KernelEvent` variant.
 - **ObserverHandle** — monotonic registration ticket (never reused).
-- **InstanceView** — read-only borrowed projection of an `Instance`.
+- **InstanceView** — read-only borrowed projection of an `Instance` (`component(...)`, `entities()`, …).
 - **A23 deterministic order** — per-tick instances are processed in ascending `InstanceId`.
 
 **Persist & crypto**
@@ -355,7 +408,7 @@ license allowlist, CVE deny).
 
 ## 8. Where else to look
 
-> **🇰🇷 한 줄:** 더 깊이 — README(개요), book/(공리·위협모델), docs/(정책·런북), docs.rs(API).
+> **In one line:** deeper references — README (overview), book/ (axioms & threat model), docs/ (policy & runbooks), docs.rs (API).
 
 - `README.md` — project overview, quick start, performance, crypto stack.
 - `book/` — the architecture book (axioms A1–A24 + S1, threat model, domain spec, decisions). `cd book && mdbook serve`.
