@@ -141,7 +141,7 @@ Full axiom catalog (A1–A24 + S1) → [`book/`](book/).
 | Crate            | Version       | Role                                              |
 | :---             | :---          | :---                                              |
 | `ed25519-dalek`  | 2.x           | RFC 8032 reference impl (Tier 2 classical sig)    |
-| `ml-dsa`         | =0.1.0        | NIST FIPS 204 ML-DSA 65 (Hybrid PQC sig)          |
+| `ml-dsa`         | =0.1.1        | NIST FIPS 204 ML-DSA 65 (Hybrid PQC sig)          |
 | `blake3`         | 1.x           | Keyed hash for WAL chain domain separation        |
 | `postcard`       | 1.x           | Canonical varint serde (deterministic encoding)   |
 | `zeroize`        | 1.x           | Signing-key + in-kernel seed scrub on drop        |

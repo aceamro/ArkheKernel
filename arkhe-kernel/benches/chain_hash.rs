@@ -8,8 +8,10 @@
 //! `derive_key + Hasher::new_keyed + update + finalize` flow is what bounds
 //! sustained throughput and is what this bench targets.
 
+use std::hint::black_box;
+
 use arkhe_kernel::WalHeader;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 
 fn bench_chain_step(c: &mut Criterion) {
     let world_seed = [0u8; 32];

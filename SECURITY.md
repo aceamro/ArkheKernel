@@ -75,7 +75,7 @@ Cryptographic primitives used by the kernel:
 
 - **BLAKE3** (`blake3` crate) — keyed chain hashing for WAL records.
 - **Ed25519** (`ed25519-dalek`) — record signatures (RFC 8032).
-- **ML-DSA 65** (`ml-dsa = "=0.1.0-rc.9"`, NIST FIPS 204 / Dilithium-3) —
+- **ML-DSA 65** (`ml-dsa = "=0.1.1"`, NIST FIPS 204 / Dilithium-3) —
   PQC signer half of the hybrid Ed25519 + ML-DSA 65 path.
 
 Reports about these crates' upstream defects belong with the upstream

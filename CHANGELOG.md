@@ -1,9 +1,38 @@
 # Changelog
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
-Versioning scheme — pre-public. The kernel version advances only when a
-release changes the persisted wire format; cosmetic fixes keep the
-version. Version 1.0 is intentionally never reached.
+Versioning scheme — pre-public. The kernel epoch (minor version) advances
+only when a release changes the persisted wire format; a v0.N-epoch WAL is
+a distinct chain epoch that does not replay under another. Patch releases
+(0.N.x) carry wire-format-neutral maintenance — dependency bumps, docs —
+and hold the epoch. Version 1.0 is intentionally never reached.
+
+## [0.14.1] — dependency maintenance (wire-format-neutral)
+
+Patch release. The persisted wire format and chain epoch are unchanged:
+`WalHeader::CURRENT_KERNEL_SEMVER` `(0,14,0)`, `ABI_VERSION` `(0,14)`, and
+the `DOMAIN_CTX` `v0.14` chain-separation literal all hold, so every
+0.14-epoch WAL replays bit-identically under 0.14.1. Package versions
+advance to `0.14.1` (`arkhe-kernel`, `arkhe-macros`, `dice`) solely to ship
+the maintenance below to crates.io.
+
+### Dependencies
+
+- `ml-dsa` `=0.1.0` → `=0.1.1` (RustCrypto). The sole upstream change is a
+  Cargo feature-propagation fix (`module-lattice/alloc` is now forwarded
+  when `alloc` is enabled); `module-lattice`'s lattice math and FIPS-204
+  serialization carry no `alloc`-conditional branches, so ML-DSA
+  signature/key bytes are UNCHANGED. Confirmed against the byte-shape size
+  pins and the chain-hash fixtures.
+- `bitflags` `2.11` → `2.13` (lockfile, within the existing `2.6` caret).
+  `CapabilityMask`'s serde representation is unchanged; WAL determinism is
+  preserved.
+- `criterion` (dev-only) `0.5` → `0.8`. The benches migrate
+  `criterion::black_box` → `std::hint::black_box` (criterion 0.8 deprecates
+  its re-export). Not a published-crate dependency, so downstream MSRV is
+  unaffected.
+- `ed25519-dalek` held at `2.x` — `3.0` is a release candidate and is
+  deliberately excluded (stable only).
 
 ## [0.14.0] — ml-dsa stabilization + audit remediation
 

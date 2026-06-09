@@ -6,7 +6,9 @@
 //! Measuring the underlying primitives surfaces the post-quantum
 //! migration cost that the kernel inherits.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, Criterion};
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use ml_dsa::signature::{Keypair, Signer as PqcSigner, Verifier as PqcVerifier};
 use ml_dsa::{MlDsa65, B32};

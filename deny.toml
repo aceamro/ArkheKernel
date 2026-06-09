@@ -35,7 +35,7 @@ confidence-threshold = 0.93
 # `multiple-versions = "warn"` (not "deny") is INTENTIONAL and reviewed:
 # the PQC Hybrid mandate pairs `ed25519-dalek` 2.x (first-generation
 # RustCrypto trait stack: `signature` 2.x + `digest` 0.10) with `ml-dsa`
-# 0.1.0 (next-generation stack: `signature` 3.x + `digest` 0.11). The two
+# 0.1.1 (next-generation stack: `signature` 3.x + `digest` 0.11). The two
 # generations cannot be collapsed while BOTH signing schemes are required,
 # so a small, known set of crypto trait/util crates (`signature`,
 # `digest`, and their `crypto-common`/`block-buffer` companions) appears

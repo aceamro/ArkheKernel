@@ -5,7 +5,9 @@
 //! replay throughput. This bench measures both directions on a synthetic
 //! payload representative of a typical small action body.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone)]

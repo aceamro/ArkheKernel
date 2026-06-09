@@ -301,7 +301,7 @@ jobs:
               echo "::warning::cargo publish --dry-run for $crate failed (path-dep not yet on crates.io, transient network, registry throttling, or any other cause); defensively skipping crate tarball signing for $crate."
               continue
             }
-            cp "target/package/${crate}-0.13.0.crate" "artifacts/crates/" || true
+            cp "target/package/${crate}"-*.crate "artifacts/crates/" || true
           done
 
       - name: Copy release binaries

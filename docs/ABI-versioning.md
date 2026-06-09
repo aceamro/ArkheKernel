@@ -6,10 +6,10 @@ ArkheKernel has **two independent version coordinate systems**. They are intenti
 
 ### 1. Project release tag (`v0.14`)
 
-- **Location**: release marker across the repo. Each crate's `Cargo.toml` `[package] version` (`0.14.0`), git tag (`v0.14`), `CHANGELOG.md` entry.
+- **Location**: release marker across the repo. Each crate's `Cargo.toml` `[package] version` (`0.14.1`), git tag (`v0.14.1`), `CHANGELOG.md` entry.
 - **Audience**: project users — "which release am I using at this point in time".
 - **Bump condition**: when there is a public change and the team-lead declares a release.
-- **Policy**: the project release advances only when a release changes the persisted wire format (the v0.13 → v0.14 ML-DSA stabilization being the first such advance); cosmetic fixes retain the version. v1.0 is intentionally never reached.
+- **Policy**: the release **epoch** (minor) advances when a release changes the persisted wire format (the v0.13 → v0.14 ML-DSA stabilization being the first such advance); wire-neutral maintenance (dependency bumps, docs) ships as a **patch** release (e.g. `0.14.1`) that holds the epoch and the L0 ABI snapshot below. v1.0 is intentionally never reached.
 
 ### 2. L0 kernel ABI snapshot (`(0, 14)` / `(0, 14, 0)`)
 

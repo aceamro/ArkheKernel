@@ -7,7 +7,9 @@
 use arkhe_kernel::abi::{CapabilityMask, EntityId, Principal, Tick, TypeCode};
 use arkhe_kernel::state::{ActionCompute, ActionContext, InstanceConfig, Op};
 use arkhe_kernel::{ArkheAction, Kernel};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, Criterion};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, ArkheAction)]

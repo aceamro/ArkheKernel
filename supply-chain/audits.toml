@@ -109,3 +109,22 @@ this release). Source review:
 - Upgrade tracking: next hop is `0.1.0 → 1.0` stabilisation; a breaking
   change at that point requires a fresh audit entry.
 """
+
+[[audits.ml-dsa]]
+who      = "cryptographer <noreply@arkhekernel.invalid>"
+delta    = "0.1.0 -> 0.1.1"
+criteria = "safe-to-deploy"
+notes    = """
+Patch upgrade reviewed against published 0.1.1 (crates.io checksum
+`add6b9d92e496f16f4526d68ff29da1483aba4b119baeab8bed3b9e3544a6f3d`). The
+sole upstream change is RustCrypto PR #1365: the `ml-dsa` `alloc` feature
+now forwards to `module-lattice/alloc` (omitted at 0.1.0). `module-lattice`
+`alloc` is an empty-marker feature gating only `MaybeBox<T>` (heap `Box<T>`
+vs inline storage; both `Deref` to an identical `&T`); the lattice algebra,
+encoding, and truncation paths carry no `cfg(feature = "alloc")` branches.
+The FIPS-204 computation and all serialized bytes (SigningKey 4032B /
+VerifyingKey 1952B / Signature 3309B) are therefore UNCHANGED —
+corroborated by the in-repo byte-shape size pins and chain-hash fixtures
+passing under the 0.1.1 lockfile. No new unsafe, no API drift.
+Upgrade tracking: next hop is `0.1.1 → 1.0` stabilisation.
+"""
