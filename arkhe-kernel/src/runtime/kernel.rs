@@ -1,25 +1,32 @@
 //! `Kernel` — top-level orchestrator.
 //!
 //! Step path: `pop_due → deserialize → compute → authorize → dispatch
-//! → apply_stage → observer.deliver`. Per-instance step ordering is
-//! `InstanceId` ascending (A23) — `BTreeMap` iteration delivers it for free.
+//! → apply_stage → digest → observer.deliver → signal router`. Per-instance
+//! step ordering is `InstanceId` ascending (A23).
+//!
+//! Under the Canonical Input Log model the kernel emits exactly two record
+//! kinds: a `Submit` when an external action is admitted ([`Kernel::submit`])
+//! and one `Step` per pop ([`Kernel::step`]). Every deterministic effect —
+//! child schedules, cross-instance signal routing, internal ids — is left
+//! unlogged and re-derived on replay by re-executing `compute()`.
 
 use std::collections::BTreeMap;
 
 use crate::abi::{ArkheError, CapabilityMask, EntityId, InstanceId, Principal, Tick, TypeCode};
-use crate::state::authz::authorize;
+use crate::state::authz::{authorize, effective_caps};
 use crate::state::{
-    Action, ActionContext, Effect, Instance, InstanceConfig, ScheduledActionId, Unverified,
+    Action, ActionContext, Effect, InboundSignal, Instance, InstanceConfig, ScheduledActionId,
+    Unverified,
 };
 
 use super::apply::apply_stage;
 use super::dispatch::dispatch;
-use super::event::{KernelEvent, ObserverHandle};
+use super::event::{KernelEvent, ObserverHandle, SignalDropReason};
 use super::observer::{KernelObserver, ObserverRegistry};
 use super::registry::ActionRegistry;
-use super::stage::StepStage;
+use super::stage::{PendingSignal, StepStage};
 
-use crate::persist::{AuthDecisionAnnotation, Wal, WalWriter};
+use crate::persist::{SkipReason, StepVerdict, Wal, WalWriter};
 
 /// Top-level kernel orchestrator.
 ///
@@ -37,6 +44,11 @@ pub struct Kernel {
     action_registry: ActionRegistry,
     observers: ObserverRegistry,
     next_instance_id: u64,
+    /// The kernel's declared `ModuleManifest` digest (A14). Pinned in any
+    /// attached WAL's header and checked by `replay_into` against the WAL it
+    /// replays — closing the otherwise-vacuous default-path manifest gate.
+    /// `[0u8; 32]` for a kernel constructed without one.
+    manifest_digest: [u8; 32],
     wal: Option<WalWriter>,
     /// Per-step staging scratch, reused across actions to avoid reallocating
     /// the `StepStage` buckets every step. `clear()`ed before each action;
@@ -94,6 +106,7 @@ impl Kernel {
             action_registry: ActionRegistry::new(),
             observers: ObserverRegistry::new(),
             next_instance_id: 0,
+            manifest_digest: [0u8; 32],
             wal: None,
             step_scratch: StepStage::default(),
         }
@@ -107,6 +120,7 @@ impl Kernel {
             action_registry: ActionRegistry::new(),
             observers: ObserverRegistry::new(),
             next_instance_id: 0,
+            manifest_digest,
             wal: Some(WalWriter::new(world_id, manifest_digest)),
             step_scratch: StepStage::default(),
         }
@@ -126,6 +140,7 @@ impl Kernel {
             action_registry: ActionRegistry::new(),
             observers: ObserverRegistry::new(),
             next_instance_id: 0,
+            manifest_digest,
             wal: Some(WalWriter::with_signature(
                 world_id,
                 manifest_digest,
@@ -133,6 +148,13 @@ impl Kernel {
             )),
             step_scratch: StepStage::default(),
         }
+    }
+
+    /// The kernel's declared `ModuleManifest` digest (A14). `[0u8; 32]` if the
+    /// kernel was built without one. `replay_into` rejects a WAL whose header
+    /// pins a different digest.
+    pub fn manifest_digest(&self) -> [u8; 32] {
+        self.manifest_digest
     }
 
     /// Current chain tip if the kernel has a WAL attached.
@@ -227,6 +249,7 @@ impl Kernel {
             action_registry: ActionRegistry::new(),
             observers: ObserverRegistry::new(),
             next_instance_id,
+            manifest_digest: [0u8; 32],
             wal: None,
             step_scratch: StepStage::default(),
         }
@@ -289,283 +312,583 @@ impl Kernel {
     /// previously-registered action type matching `action_type_code`.
     /// Returns the freshly-allocated [`ScheduledActionId`].
     ///
+    /// `caps` is the capability ceiling granted to this submission — it is
+    /// pinned on the scheduled entry and bounds the action's effective caps
+    /// at execution (see [`effective_caps`]). It is the only non-reproducible
+    /// scheduling input, so an attached WAL records one `Submit` here (a
+    /// CIL admission); the resulting `ScheduledActionId` is recorded with it
+    /// so replay re-injects the action under the exact same id.
+    ///
     /// Errors with [`ArkheError::InstanceNotFound`] if `instance` is
     /// unknown.
+    #[allow(clippy::too_many_arguments)]
     pub fn submit(
         &mut self,
         instance: InstanceId,
         principal: Principal,
         actor: Option<EntityId>,
+        caps: CapabilityMask,
         at: Tick,
         action_type_code: TypeCode,
         action_bytes: Vec<u8>,
     ) -> Result<ScheduledActionId, ArkheError> {
+        // Clone the bytes for the WAL record only when a WAL is attached
+        // (the scheduler takes ownership of the original).
+        let wal_bytes = if self.wal.is_some() {
+            Some(action_bytes.clone())
+        } else {
+            None
+        };
+        let id = {
+            let inst = self
+                .instances
+                .get_mut(&instance)
+                .ok_or(ArkheError::InstanceNotFound)?;
+            // Back-pressure (#15): bound the scheduler so an external caller
+            // cannot flood `submit` into unbounded growth. `max_scheduled == 0`
+            // means unlimited (default `InstanceConfig`).
+            let max_scheduled = inst.config().max_scheduled;
+            if max_scheduled > 0 && inst.scheduler().len() >= max_scheduled as usize {
+                return Err(ArkheError::QuotaExceeded);
+            }
+            let counters = inst.id_counters_mut();
+            counters.next_scheduled = counters.next_scheduled.saturating_add(1);
+            let id = ScheduledActionId::new(counters.next_scheduled).expect("scheduled id > 0");
+            inst.scheduler_mut().schedule_with_id(
+                id,
+                at,
+                actor,
+                principal.clone(),
+                caps,
+                action_type_code,
+                action_bytes,
+            );
+            id
+        };
+        if let (Some(wal), Some(bytes)) = (self.wal.as_mut(), wal_bytes) {
+            let _ = wal.append_submit(
+                instance,
+                principal,
+                actor,
+                caps.bits(),
+                at,
+                action_type_code,
+                bytes,
+                id,
+            );
+        }
+        Ok(id)
+    }
+
+    /// Replay-side admission: inject a previously-recorded `Submit` under its
+    /// exact `id`, capability ceiling, and inputs. No WAL is written (replay
+    /// re-measures the chain through its own writer) and the scheduler/id
+    /// counters are advanced so subsequent internal id allocation reproduces
+    /// the original sequence bit-for-bit. The back-pressure check is skipped
+    /// — a recorded submit already passed it at original-admission time.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn submit_with_id(
+        &mut self,
+        instance: InstanceId,
+        principal: Principal,
+        actor: Option<EntityId>,
+        caps: CapabilityMask,
+        id: ScheduledActionId,
+        at: Tick,
+        action_type_code: TypeCode,
+        action_bytes: Vec<u8>,
+    ) -> Result<(), ArkheError> {
         let inst = self
             .instances
             .get_mut(&instance)
             .ok_or(ArkheError::InstanceNotFound)?;
-        // Back-pressure (#15): bound the scheduler so an external caller
-        // cannot flood `submit` into unbounded growth. `max_scheduled == 0`
-        // means unlimited (default `InstanceConfig`).
-        let max_scheduled = inst.config().max_scheduled;
-        if max_scheduled > 0 && inst.scheduler().len() >= max_scheduled as usize {
-            return Err(ArkheError::QuotaExceeded);
-        }
+        // Mirror `submit`'s counter advance so a re-executed `Op::ScheduleAction`
+        // mints the same next id (the kernel-level `next_scheduled` seeds
+        // dispatch's allocator; the scheduler's own `next_id` is bumped by
+        // `schedule_with_id`).
         let counters = inst.id_counters_mut();
-        counters.next_scheduled = counters.next_scheduled.saturating_add(1);
-        let id = ScheduledActionId::new(counters.next_scheduled).expect("scheduled id > 0");
+        if id.get() > counters.next_scheduled {
+            counters.next_scheduled = id.get();
+        }
         inst.scheduler_mut().schedule_with_id(
             id,
             at,
             actor,
             principal,
+            caps,
             action_type_code,
             action_bytes,
         );
-        Ok(id)
+        Ok(())
     }
 
     /// Process at most one due action per instance, in ascending InstanceId
-    /// order (A23). Returns aggregated counters for the step.
+    /// order (A23). `caps` is the operator SESSION CEILING — it intersects
+    /// (never widens) each action's resolved capabilities. Returns aggregated
+    /// counters and, with a WAL attached, appends one `Step` record per pop.
     pub fn step(&mut self, now: Tick, caps: CapabilityMask) -> StepReport {
         let mut report = StepReport::default();
+        // The digest is the per-step bit-identity witness; it is only needed
+        // when it will be recorded (WAL attached) — skip the full-state hash
+        // on the plain stepping path so it costs nothing there.
+        let measure_digest = self.wal.is_some();
 
-        // Destructure once so the per-instance walk borrows `instances`
-        // (mutably, via `iter_mut`) disjointly from the registry / observers /
-        // WAL. This removes the per-step `Vec<InstanceId>` snapshot and the
-        // repeated O(log n) re-lookups it existed only to work around (the
-        // single `inst` borrow serves pop_due, the read view, and apply).
-        // `BTreeMap::iter_mut` yields ascending `InstanceId` (A23) — the same
-        // order as the previous collected-keys walk, so WAL append order,
-        // state-mutation order, and observer delivery order are unchanged. No
-        // Op creates or removes an instance mid-step, so holding one `inst`
-        // borrow across the iteration is sound (the old `None => continue`
-        // re-lookup guard was dead code).
-        let Self {
-            instances,
-            action_registry,
-            observers,
-            wal,
-            step_scratch,
-            ..
-        } = self;
-
-        for (&inst_id, inst) in instances.iter_mut() {
-            let entry = match inst.scheduler_mut().pop_due(now) {
-                Some(e) => e,
-                None => continue,
+        // Ascending-InstanceId key snapshot (A23). A snapshot is required —
+        // not `iter_mut` — because the post-step signal router needs the whole
+        // instance map (a sender routes into *other* instances' inboxes), so
+        // the per-instance borrow cannot be held across the round.
+        let ids: Vec<InstanceId> = self.instances.keys().copied().collect();
+        for inst_id in ids {
+            let Some(result) = self.process_instance_record(inst_id, now, caps, measure_digest)
+            else {
+                continue;
             };
             report.actions_executed = report.actions_executed.saturating_add(1);
-
-            let reg = match action_registry.get(entry.action_type_code).cloned() {
-                Some(r) => r,
-                None => continue,
-            };
-
-            let action = match (reg.deserializer)(reg.schema_version, &entry.action_bytes) {
-                Ok(a) => a,
-                Err(_) => continue,
-            };
-
-            let ctx = ActionContext::new(entry.actor, now, inst_id, &*inst);
-            let ops = action.compute_dyn(&ctx);
-
-            // Immutable read view for the gate loop; its borrow ends before the
-            // mutable `apply_stage` below (NLL).
-            let inst_ref = &*inst;
-            // Reuse the kernel-owned scratch (capacity retained across actions)
-            // rather than allocating a fresh StepStage each step. `clear()`
-            // makes it identical to `StepStage::default()`.
-            step_scratch.clear();
-            let stage = &mut *step_scratch;
-            let mut next_scheduled_id = inst_ref.id_counters_snapshot().next_scheduled;
-            let budget = inst_ref.config().memory_budget_bytes;
-            let baseline_bytes: u64 = inst_ref.ledger().total_bytes();
-            let mut any_denied = false;
-            // Provisional applied count — folded into the report only on the
-            // commit path. If the step rolls back (`any_denied`), these ops
-            // are discarded, so they must not be counted as applied.
-            let mut applied_this_action: u32 = 0;
-            for op in ops {
-                let principal_clone = match &entry.principal {
-                    Principal::Unauthenticated => Principal::Unauthenticated,
-                    Principal::External(e) => Principal::External(*e),
-                    Principal::System => Principal::System,
-                };
-                let eff: Effect<'_, Unverified> = Effect::new(inst_id, principal_clone, op);
-                match authorize(caps, eff) {
-                    Ok(authorized) => {
-                        // Budget enforcement (per-Op, post-authorize, pre-dispatch).
-                        // `budget == 0` means unlimited (default `InstanceConfig`).
-                        // Authorize-deny rolls back the whole stage (any_denied);
-                        // budget-deny is a per-Op skip that does NOT rollback.
-                        if budget > 0 {
-                            // Project the post-commit component-byte total in
-                            // saturating u64 (matching ResourceLedger's own
-                            // arithmetic): the baseline + every already-staged
-                            // component delta + this Op. A SetComponent adds its
-                            // caller-declared `size`; a RemoveComponent credits
-                            // only the bytes the ledger will actually free (its
-                            // stored size), never the untrusted caller-declared
-                            // `size` — an inflated remove would otherwise poison
-                            // the projection and disable the budget for the rest
-                            // of the step. Working in u64 (not i64) means an
-                            // oversized add saturates to u64::MAX and trips any
-                            // budget below u64::MAX — including budgets above
-                            // i64::MAX, which the old i64 threshold silently
-                            // disabled.
-                            let staged = super::stage::projected_component_bytes(
-                                baseline_bytes,
-                                &*stage,
-                                inst_ref.ledger(),
-                            );
-                            let projected = match &authorized.op {
-                                crate::state::Op::SetComponent { size, .. } => {
-                                    staged.saturating_add(*size)
-                                }
-                                crate::state::Op::RemoveComponent {
-                                    entity, type_code, ..
-                                } => {
-                                    let freed = inst_ref
-                                        .ledger()
-                                        .component_size(*entity, *type_code)
-                                        .unwrap_or(0);
-                                    staged.saturating_sub(freed)
-                                }
-                                _ => staged,
-                            };
-                            if projected > budget {
-                                report.effects_denied = report.effects_denied.saturating_add(1);
-                                stage.events.push_back(KernelEvent::EffectFailed {
-                                    instance: inst_id,
-                                    reason: bytes::Bytes::from_static(b"budget_exceeded"),
-                                });
-                                continue;
-                            }
-                        }
-                        // Entity quota (#5; `max_entities == 0` = unlimited).
-                        // Conservative projection = committed live entities +
-                        // entity-spawns staged so far this step (favors
-                        // false-deny, like the byte-budget gate).
-                        let max_entities = inst_ref.config().max_entities;
-                        if max_entities > 0
-                            && matches!(&authorized.op, crate::state::Op::SpawnEntity { .. })
-                        {
-                            let projected_entities = (inst_ref.entities_len() as u64)
-                                .saturating_add(stage.id_counters.next_entity_advance);
-                            if projected_entities >= max_entities as u64 {
-                                report.effects_denied = report.effects_denied.saturating_add(1);
-                                stage.events.push_back(KernelEvent::EffectFailed {
-                                    instance: inst_id,
-                                    reason: bytes::Bytes::from_static(b"entity_quota_exceeded"),
-                                });
-                                continue;
-                            }
-                        }
-                        // Scheduled-action quota (#8; `max_scheduled == 0` =
-                        // unlimited). Projection = current scheduler depth +
-                        // schedule-adds staged so far this step.
-                        let max_scheduled = inst_ref.config().max_scheduled;
-                        if max_scheduled > 0
-                            && matches!(&authorized.op, crate::state::Op::ScheduleAction { .. })
-                        {
-                            let projected_scheduled = (inst_ref.scheduler().len() as u64)
-                                .saturating_add(stage.id_counters.next_scheduled_advance);
-                            if projected_scheduled >= max_scheduled as u64 {
-                                report.effects_denied = report.effects_denied.saturating_add(1);
-                                stage.events.push_back(KernelEvent::EffectFailed {
-                                    instance: inst_id,
-                                    reason: bytes::Bytes::from_static(b"scheduled_quota_exceeded"),
-                                });
-                                continue;
-                            }
-                        }
-                        dispatch(authorized, stage, now, &mut next_scheduled_id);
-                        applied_this_action = applied_this_action.saturating_add(1);
-                    }
-                    Err(_) => {
-                        report.effects_denied = report.effects_denied.saturating_add(1);
-                        any_denied = true;
-                    }
-                }
-            }
-
-            if any_denied {
-                // Rollback: skip apply entirely. The scratch is `clear()`ed at
-                // the top of the next action, so nothing staged here leaks.
-                continue;
-            }
-
-            // Commit path: only now are the dispatched ops actually applied,
-            // so fold the provisional count into the report (a rolled-back
-            // step contributes zero applied effects).
             report.effects_applied = report
                 .effects_applied
-                .saturating_add(applied_this_action);
-
-            // Domain emit count covers only `DomainEventEmitted`; other staged
-            // events (e.g. `EffectFailed` from budget deny) are kernel events.
-            let domain_emit_count = stage
-                .events
-                .iter()
-                .filter(|e| matches!(e, KernelEvent::DomainEventEmitted { .. }))
-                .count();
+                .saturating_add(result.effects_applied);
+            report.effects_denied = report.effects_denied.saturating_add(result.effects_denied);
             report.domain_events_emitted = report
                 .domain_events_emitted
-                .saturating_add(domain_emit_count as u32);
-            let events_to_deliver: Vec<KernelEvent> = stage.events.iter().cloned().collect();
-
-            // Snapshot record metadata before stage is consumed by apply.
-            let wal_stage = if wal.is_some() {
-                Some(stage.clone())
-            } else {
-                None
-            };
-            let principal_for_wal = match &entry.principal {
-                Principal::Unauthenticated => Principal::Unauthenticated,
-                Principal::External(e) => Principal::External(*e),
-                Principal::System => Principal::System,
-            };
-            let action_bytes_for_wal = entry.action_bytes.clone();
-            let action_type_for_wal = entry.action_type_code;
-            let actor_for_wal = entry.actor;
-
-            apply_stage(inst, stage);
-
-            if let (Some(wal), Some(s)) = (wal.as_mut(), wal_stage) {
-                let _ = wal.append(
-                    now,
-                    inst_id,
-                    principal_for_wal,
-                    actor_for_wal,
-                    action_type_for_wal,
-                    action_bytes_for_wal,
-                    caps.bits(),
-                    s,
-                    AuthDecisionAnnotation::AllAuthorized,
-                );
-            }
-
-            for event in events_to_deliver {
-                let evicted = observers.deliver(&event);
-                report.observers_evicted = report
-                    .observers_evicted
-                    .saturating_add(evicted.len() as u32);
-            }
-
-            let action_executed = KernelEvent::ActionExecuted {
-                instance: inst_id,
-                action_type: entry.action_type_code,
-                at: now,
-            };
-            let evicted = observers.deliver(&action_executed);
+                .saturating_add(result.domain_events_emitted);
             report.observers_evicted = report
                 .observers_evicted
-                .saturating_add(evicted.len() as u32);
+                .saturating_add(result.observers_evicted);
+            // CIL: one `Step` record per pop — Committed / AuthDenied /
+            // BudgetPartial / Skipped alike (the verdict + post-state digest
+            // are the only non-reproducible facts; routing/scheduling effects
+            // are re-derived on replay).
+            if let Some(wal) = self.wal.as_mut() {
+                let _ = wal.append_step(
+                    inst_id,
+                    result.popped_id,
+                    now,
+                    caps.bits(),
+                    result.verdict,
+                    result.digest,
+                );
+            }
         }
 
         report
     }
+
+    /// Run one due action for `inst_id` end-to-end: pop → gate → dispatch →
+    /// apply → digest → deliver observer events → route outbound signals.
+    /// Returns `None` if nothing was due. Shared verbatim by the live `step`
+    /// loop and `replay` so both reach bit-identical state and verdicts.
+    ///
+    /// The signal router runs here, immediately after this instance's own
+    /// apply and digest, so a signal this instance sends is delivered into the
+    /// target's inbox before any later instance steps this round — and is
+    /// witnessed by that target's next `Step` digest. The ordering is
+    /// identical on replay (records are re-driven in the same order), so the
+    /// digests match.
+    pub(crate) fn process_instance_record(
+        &mut self,
+        inst_id: InstanceId,
+        now: Tick,
+        session_caps: CapabilityMask,
+        measure_digest: bool,
+    ) -> Option<InstanceStepResult> {
+        // ---- 1. step_one core (partial borrow: one instance + registry + scratch) ----
+        // A missing instance returns `None` (not a panic): the live `step` loop
+        // only ever passes ids drawn from the live key set, but `replay` passes
+        // the `instance` from a (possibly malformed / adversarial) WAL Step
+        // record — which `replay_records` then surfaces as a graceful
+        // `ReplayError::StepUnderflow` rather than a panic (A12 panic-free
+        // discipline holds for untrusted input).
+        let core = {
+            let Self {
+                instances,
+                action_registry,
+                step_scratch,
+                ..
+            } = self;
+            let inst = instances.get_mut(&inst_id)?;
+            step_one_core(
+                inst_id,
+                inst,
+                action_registry,
+                step_scratch,
+                now,
+                session_caps,
+                measure_digest,
+            )
+        }?;
+
+        let mut result = InstanceStepResult {
+            popped_id: core.popped_id,
+            verdict: core.verdict,
+            digest: core.digest,
+            effects_applied: core.effects_applied,
+            effects_denied: core.effects_denied,
+            domain_events_emitted: core.domain_events_emitted,
+            observers_evicted: 0,
+        };
+
+        // ---- 2. observer delivery (staged events, then ActionExecuted) ----
+        for event in &core.events {
+            let evicted = self.observers.deliver(event);
+            result.observers_evicted = result
+                .observers_evicted
+                .saturating_add(evicted.len() as u32);
+        }
+        // `ActionExecuted` fires only when the action actually committed (fully
+        // or partially) — exactly the pre-epoch contract, where a rolled-back
+        // step (`any_denied`) and an unexecuted skip both delivered no
+        // `ActionExecuted`. AuthDenied (full rollback) and Skipped are excluded.
+        if matches!(
+            core.verdict,
+            StepVerdict::Committed | StepVerdict::BudgetPartial { .. }
+        ) {
+            let action_executed = KernelEvent::ActionExecuted {
+                instance: inst_id,
+                action_type: core.action_type,
+                at: now,
+            };
+            let evicted = self.observers.deliver(&action_executed);
+            result.observers_evicted = result
+                .observers_evicted
+                .saturating_add(evicted.len() as u32);
+        }
+
+        // ---- 3. signal router (cross-instance; needs the full map) ----
+        // A signal's in-flight refcount is a conserved quantity: it is
+        // credited on the TARGET's route here, at delivery (a delivered
+        // signal increments; a dropped one does not) — never speculatively at
+        // dispatch. Delivery is unlogged; replay re-derives it identically.
+        for sig in core.pending_signals {
+            let route = sig.route;
+            let target_id = sig.target;
+            let event = match self.instances.get_mut(&target_id) {
+                Some(target) => {
+                    let max_inbox = target.config().max_inbox_per_route;
+                    if max_inbox > 0 && target.inbox_len(route) >= max_inbox as usize {
+                        KernelEvent::SignalDropped {
+                            target: target_id,
+                            route,
+                            reason: SignalDropReason::QueueFull,
+                        }
+                    } else {
+                        target.deliver_signal(
+                            route,
+                            InboundSignal {
+                                from: inst_id,
+                                principal: sig.principal,
+                                payload: sig.payload,
+                                // Assigned by `deliver_signal` from the target's
+                                // own monotonic `inbox_seq`.
+                                seq: 0,
+                            },
+                        );
+                        let entry = target.inflight_refs_mut().entry(route).or_insert(0);
+                        *entry = entry.saturating_add(1);
+                        KernelEvent::SignalDelivered {
+                            from: inst_id,
+                            target: target_id,
+                            route,
+                        }
+                    }
+                }
+                None => KernelEvent::SignalDropped {
+                    target: target_id,
+                    route,
+                    reason: SignalDropReason::TargetNotFound,
+                },
+            };
+            let evicted = self.observers.deliver(&event);
+            result.observers_evicted = result
+                .observers_evicted
+                .saturating_add(evicted.len() as u32);
+        }
+
+        Some(result)
+    }
+}
+
+/// Per-pop outcome carried out of [`Kernel::process_instance_record`] to the
+/// live `step` loop / `replay` driver: the WAL `Step` fields plus the
+/// observability counters.
+pub(crate) struct InstanceStepResult {
+    /// ScheduledActionId popped this step (scheduler-order witness).
+    pub popped_id: ScheduledActionId,
+    /// Step outcome verdict.
+    pub verdict: StepVerdict,
+    /// Full post-step state digest (`[0u8; 32]` when `measure_digest` was
+    /// false — the plain no-WAL stepping path, where it is unused).
+    pub digest: [u8; 32],
+    /// Effects committed this step.
+    pub effects_applied: u32,
+    /// Effects denied (authorize / budget / quota) this step.
+    pub effects_denied: u32,
+    /// `DomainEventEmitted` events produced this step.
+    pub domain_events_emitted: u32,
+    /// Observers newly evicted while delivering this step's events.
+    pub observers_evicted: u32,
+}
+
+/// Internal result of the pop → gate → dispatch → apply → digest core, before
+/// observer delivery and signal routing (which need kernel-wide state).
+struct StepCore {
+    popped_id: ScheduledActionId,
+    action_type: TypeCode,
+    verdict: StepVerdict,
+    digest: [u8; 32],
+    pending_signals: Vec<PendingSignal>,
+    events: Vec<KernelEvent>,
+    effects_applied: u32,
+    effects_denied: u32,
+    domain_events_emitted: u32,
+}
+
+/// Pop one due action for `inst` and run it through the gate loop, producing
+/// a [`StepCore`] (verdict + post-state digest + staged outputs). Pure with
+/// respect to other instances — observer delivery and the cross-instance
+/// signal router run in [`Kernel::process_instance_record`], which owns the
+/// kernel-wide borrows. Returns `None` if no action was due.
+#[allow(clippy::too_many_arguments)]
+fn step_one_core(
+    inst_id: InstanceId,
+    inst: &mut Instance,
+    registry: &ActionRegistry,
+    scratch: &mut StepStage,
+    now: Tick,
+    session_caps: CapabilityMask,
+    measure_digest: bool,
+) -> Option<StepCore> {
+    let entry = inst.scheduler_mut().pop_due(now)?;
+    let popped_id = entry.id;
+    let action_type = entry.action_type_code;
+
+    // A digest helper closure that elides the full-state hash when unneeded.
+    let digest_of = |inst: &Instance| -> [u8; 32] {
+        if measure_digest {
+            inst.state_digest()
+        } else {
+            [0u8; 32]
+        }
+    };
+
+    // Skipped: no registry entry for the popped type. The pop already mutated
+    // the scheduler (the entry is gone), which the digest witnesses.
+    let reg = match registry.get(entry.action_type_code).cloned() {
+        Some(r) => r,
+        None => {
+            return Some(StepCore {
+                popped_id,
+                action_type,
+                verdict: StepVerdict::Skipped {
+                    reason: SkipReason::Unregistered,
+                },
+                digest: digest_of(inst),
+                pending_signals: Vec::new(),
+                events: Vec::new(),
+                effects_applied: 0,
+                effects_denied: 0,
+                domain_events_emitted: 0,
+            });
+        }
+    };
+
+    // Skipped: bytes fail to deserialize under the registered schema.
+    let action = match (reg.deserializer)(reg.schema_version, &entry.action_bytes) {
+        Ok(a) => a,
+        Err(_) => {
+            return Some(StepCore {
+                popped_id,
+                action_type,
+                verdict: StepVerdict::Skipped {
+                    reason: SkipReason::DeserFailed,
+                },
+                digest: digest_of(inst),
+                pending_signals: Vec::new(),
+                events: Vec::new(),
+                effects_applied: 0,
+                effects_denied: 0,
+                domain_events_emitted: 0,
+            });
+        }
+    };
+
+    // Resolve the capabilities this action runs under: the unified ceiling
+    // model (config default_caps bounded by the entry's inherited ceiling per
+    // principal) intersected with the operator session ceiling. There is no
+    // System blanket bypass — a System action is privileged only insofar as
+    // `default_caps` grants and the session permits.
+    let eff = effective_caps(inst.config().default_caps, &entry.principal, entry.caps_ceiling)
+        & session_caps;
+
+    let ctx = ActionContext::new(entry.actor, now, inst_id, &*inst);
+    let ops = action.compute_dyn(&ctx);
+
+    // Immutable read view for the gate loop; its borrow ends before the
+    // mutable `apply_stage` below (NLL).
+    let inst_ref = &*inst;
+    // Reuse the kernel-owned scratch (capacity retained across actions)
+    // rather than allocating a fresh StepStage each step. `clear()`
+    // makes it identical to `StepStage::default()`.
+    scratch.clear();
+    let stage = &mut *scratch;
+    let mut next_scheduled_id = inst_ref.id_counters_snapshot().next_scheduled;
+    let budget = inst_ref.config().memory_budget_bytes;
+    let baseline_bytes: u64 = inst_ref.ledger().total_bytes();
+    let mut any_denied = false;
+    // Provisional applied count — folded in only on the commit path. If the
+    // step rolls back (`any_denied`), these ops are discarded.
+    let mut applied_this_action: u32 = 0;
+    // Per-Op budget/quota skips (do NOT roll back). A committed step with one
+    // or more of these records `BudgetPartial { denied }`.
+    let mut denied_this_action: u32 = 0;
+    for op in ops {
+        let unverified: Effect<'_, Unverified> = Effect::new(inst_id, entry.principal.clone(), op);
+        match authorize(eff, unverified) {
+            Ok(authorized) => {
+                // Budget enforcement (per-Op, post-authorize, pre-dispatch).
+                // `budget == 0` means unlimited (default `InstanceConfig`).
+                // Authorize-deny rolls back the whole stage (any_denied);
+                // budget-deny is a per-Op skip that does NOT rollback.
+                if budget > 0 {
+                    // Project the post-commit component-byte total in
+                    // saturating u64 (matching ResourceLedger's own
+                    // arithmetic): the baseline + every already-staged
+                    // component delta + this Op. A SetComponent adds its
+                    // caller-declared `size`; a RemoveComponent credits
+                    // only the bytes the ledger will actually free (its
+                    // stored size), never the untrusted caller-declared
+                    // `size` — an inflated remove would otherwise poison
+                    // the projection and disable the budget for the rest
+                    // of the step. Working in u64 (not i64) means an
+                    // oversized add saturates to u64::MAX and trips any
+                    // budget below u64::MAX — including budgets above
+                    // i64::MAX, which the old i64 threshold silently
+                    // disabled.
+                    let staged = super::stage::projected_component_bytes(
+                        baseline_bytes,
+                        &*stage,
+                        inst_ref.ledger(),
+                    );
+                    let projected = match &authorized.op {
+                        crate::state::Op::SetComponent { size, .. } => staged.saturating_add(*size),
+                        crate::state::Op::RemoveComponent {
+                            entity, type_code, ..
+                        } => {
+                            let freed = inst_ref
+                                .ledger()
+                                .component_size(*entity, *type_code)
+                                .unwrap_or(0);
+                            staged.saturating_sub(freed)
+                        }
+                        crate::state::Op::SpawnEntity { .. }
+                        | crate::state::Op::DespawnEntity { .. }
+                        | crate::state::Op::EmitEvent { .. }
+                        | crate::state::Op::ScheduleAction { .. }
+                        | crate::state::Op::SendSignal { .. } => staged,
+                    };
+                    if projected > budget {
+                        denied_this_action = denied_this_action.saturating_add(1);
+                        stage.events.push_back(KernelEvent::EffectFailed {
+                            instance: inst_id,
+                            reason: bytes::Bytes::from_static(b"budget_exceeded"),
+                        });
+                        continue;
+                    }
+                }
+                // Entity quota (#5; `max_entities == 0` = unlimited).
+                // Conservative projection = committed live entities +
+                // entity-spawns staged so far this step (favors
+                // false-deny, like the byte-budget gate).
+                let max_entities = inst_ref.config().max_entities;
+                if max_entities > 0
+                    && matches!(&authorized.op, crate::state::Op::SpawnEntity { .. })
+                {
+                    let projected_entities = (inst_ref.entities_len() as u64)
+                        .saturating_add(stage.id_counters.next_entity_advance);
+                    if projected_entities >= max_entities as u64 {
+                        denied_this_action = denied_this_action.saturating_add(1);
+                        stage.events.push_back(KernelEvent::EffectFailed {
+                            instance: inst_id,
+                            reason: bytes::Bytes::from_static(b"entity_quota_exceeded"),
+                        });
+                        continue;
+                    }
+                }
+                // Scheduled-action quota (#8; `max_scheduled == 0` =
+                // unlimited). Projection = current scheduler depth +
+                // schedule-adds staged so far this step.
+                let max_scheduled = inst_ref.config().max_scheduled;
+                if max_scheduled > 0
+                    && matches!(&authorized.op, crate::state::Op::ScheduleAction { .. })
+                {
+                    let projected_scheduled = (inst_ref.scheduler().len() as u64)
+                        .saturating_add(stage.id_counters.next_scheduled_advance);
+                    if projected_scheduled >= max_scheduled as u64 {
+                        denied_this_action = denied_this_action.saturating_add(1);
+                        stage.events.push_back(KernelEvent::EffectFailed {
+                            instance: inst_id,
+                            reason: bytes::Bytes::from_static(b"scheduled_quota_exceeded"),
+                        });
+                        continue;
+                    }
+                }
+                dispatch(authorized, stage, now, &mut next_scheduled_id, eff);
+                applied_this_action = applied_this_action.saturating_add(1);
+            }
+            Err(_) => {
+                denied_this_action = denied_this_action.saturating_add(1);
+                any_denied = true;
+            }
+        }
+    }
+
+    if any_denied {
+        // Rollback: skip apply entirely (no effects, no signals, no events).
+        // The pop still happened, so the digest reflects the scheduler with
+        // the entry removed. The scratch is `clear()`ed at the top of the
+        // next action, so nothing staged here leaks.
+        return Some(StepCore {
+            popped_id,
+            action_type,
+            verdict: StepVerdict::AuthDenied,
+            digest: digest_of(inst),
+            pending_signals: Vec::new(),
+            events: Vec::new(),
+            effects_applied: 0,
+            effects_denied: denied_this_action,
+            domain_events_emitted: 0,
+        });
+    }
+
+    // Commit path. Domain emit count covers only `DomainEventEmitted`; other
+    // staged events (e.g. `EffectFailed` from a budget deny) are kernel events.
+    let domain_emit_count = stage
+        .events
+        .iter()
+        .filter(|e| matches!(e, KernelEvent::DomainEventEmitted { .. }))
+        .count() as u32;
+    let events_to_deliver: Vec<KernelEvent> = stage.events.iter().cloned().collect();
+    let pending_signals = apply_stage(inst, stage);
+    let digest = digest_of(inst);
+
+    let verdict = if denied_this_action > 0 {
+        StepVerdict::BudgetPartial {
+            denied: denied_this_action,
+        }
+    } else {
+        StepVerdict::Committed
+    };
+
+    Some(StepCore {
+        popped_id,
+        action_type,
+        verdict,
+        digest,
+        pending_signals,
+        events: events_to_deliver,
+        effects_applied: applied_this_action,
+        effects_denied: denied_this_action,
+        domain_events_emitted: domain_emit_count,
+    })
 }
 
 #[cfg(test)]
@@ -733,7 +1056,6 @@ mod tests {
                     actor: None,
                     action_type_code: TypeCode(100),
                     action_bytes: Bytes::from_static(b""),
-                    action_principal: Principal::System,
                 },
             ]
         }
@@ -776,6 +1098,7 @@ mod tests {
             bogus,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(100),
             Vec::new(),
@@ -793,7 +1116,7 @@ mod tests {
             ..Default::default()
         });
         let sub = |k: &mut Kernel| {
-            k.submit(inst, Principal::System, None, Tick(0), TypeCode(100), Vec::new())
+            k.submit(inst, Principal::System, None, CapabilityMask::SYSTEM, Tick(0), TypeCode(100), Vec::new())
         };
         assert!(sub(&mut k).is_ok());
         assert!(sub(&mut k).is_ok());
@@ -810,7 +1133,7 @@ mod tests {
             max_entities: 2,
             ..Default::default()
         });
-        k.submit(inst, Principal::System, None, Tick(0), TypeCode(103), Vec::new())
+        k.submit(inst, Principal::System, None, CapabilityMask::SYSTEM, Tick(0), TypeCode(103), Vec::new())
             .unwrap();
         let report = k.step(Tick(0), CapabilityMask::SYSTEM);
         assert_eq!(report.effects_applied, 2);
@@ -828,7 +1151,7 @@ mod tests {
             memory_budget_bytes: 1000,
             ..Default::default()
         });
-        k.submit(inst, Principal::System, None, Tick(0), TypeCode(104), Vec::new())
+        k.submit(inst, Principal::System, None, CapabilityMask::SYSTEM, Tick(0), TypeCode(104), Vec::new())
             .unwrap();
         let report = k.step(Tick(0), CapabilityMask::SYSTEM);
         assert_eq!(report.effects_applied, 0);
@@ -848,7 +1171,7 @@ mod tests {
             memory_budget_bytes: 1u64 << 63, // i64::MAX + 1, above i64::MAX
             ..Default::default()
         });
-        k.submit(inst, Principal::System, None, Tick(0), TypeCode(104), Vec::new())
+        k.submit(inst, Principal::System, None, CapabilityMask::SYSTEM, Tick(0), TypeCode(104), Vec::new())
             .unwrap();
         let report = k.step(Tick(0), CapabilityMask::SYSTEM);
         assert_eq!(report.effects_applied, 0);
@@ -871,7 +1194,7 @@ mod tests {
             memory_budget_bytes: 100,
             ..Default::default()
         });
-        k.submit(inst, Principal::System, None, Tick(0), TypeCode(105), Vec::new())
+        k.submit(inst, Principal::System, None, CapabilityMask::SYSTEM, Tick(0), TypeCode(105), Vec::new())
             .unwrap();
         let report = k.step(Tick(0), CapabilityMask::SYSTEM);
         assert_eq!(
@@ -892,11 +1215,16 @@ mod tests {
         // effects_applied (it was discarded), and instance state is unchanged.
         let mut k = Kernel::new();
         k.register_action::<SpawnThenScheduleAction>();
+        let counters = Arc::new(VariantCounters::default());
+        k.register_observer(Box::new(VariantTallyObserver {
+            counters: counters.clone(),
+        }));
         let inst = k.create_instance(InstanceConfig::default());
         k.submit(
             inst,
             Principal::External(ExternalId(7)),
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(106),
             Vec::new(),
@@ -915,6 +1243,13 @@ mod tests {
             0,
             "rollback restores instance state"
         );
+        // A rolled-back step delivers NO ActionExecuted (the action did not
+        // commit) — preserving the pre-epoch observer contract.
+        assert_eq!(
+            counters.action_executed.load(Ordering::SeqCst),
+            0,
+            "AuthDenied rollback must not emit ActionExecuted"
+        );
     }
 
     #[test]
@@ -926,6 +1261,7 @@ mod tests {
             inst,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(100),
             Vec::new(),
@@ -950,6 +1286,7 @@ mod tests {
             inst,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(999),
             Vec::new(),
@@ -975,6 +1312,7 @@ mod tests {
             inst,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(100),
             Vec::new(),
@@ -998,6 +1336,7 @@ mod tests {
             inst,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(101),
             Vec::new(),
@@ -1019,6 +1358,7 @@ mod tests {
             inst,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(100),
             Vec::new(),
@@ -1038,6 +1378,7 @@ mod tests {
             inst,
             Principal::Unauthenticated,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(100),
             Vec::new(),
@@ -1059,6 +1400,7 @@ mod tests {
             inst,
             Principal::External(ExternalId(7)),
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(102),
             Vec::new(),
@@ -1070,23 +1412,27 @@ mod tests {
     }
 
     #[test]
-    fn wal_attached_kernel_records_committed_step() {
+    fn wal_attached_kernel_records_submit_then_step() {
+        // CIL: `submit` appends one `Submit` record; the committed `step`
+        // appends one `Step` record (2 records total for one admitted action).
         let mut k = Kernel::new_with_wal([7u8; 32], [3u8; 32]);
         k.register_action::<SpawnOneAction>();
         let inst = k.create_instance(InstanceConfig::default());
+        assert_eq!(k.wal_record_count(), Some(0));
         k.submit(
             inst,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(100),
             Vec::new(),
         )
         .unwrap();
-        assert_eq!(k.wal_record_count(), Some(0));
+        assert_eq!(k.wal_record_count(), Some(1));
         let pre_tip = k.wal_chain_tip().unwrap();
         k.step(Tick(5), CapabilityMask::SYSTEM);
-        assert_eq!(k.wal_record_count(), Some(1));
+        assert_eq!(k.wal_record_count(), Some(2));
         let post_tip = k.wal_chain_tip().unwrap();
         assert_ne!(pre_tip, post_tip);
     }
@@ -1101,6 +1447,7 @@ mod tests {
                 inst,
                 Principal::System,
                 None,
+                CapabilityMask::SYSTEM,
                 Tick(0),
                 TypeCode(100),
                 Vec::new(),
@@ -1109,7 +1456,8 @@ mod tests {
             k.step(Tick(0), CapabilityMask::SYSTEM);
         }
         let wal = k.export_wal().expect("wal attached");
-        assert_eq!(wal.records.len(), 3);
+        // 3 admitted actions → 3 Submit + 3 Step records.
+        assert_eq!(wal.records.len(), 6);
         wal.verify_chain([11u8; 32]).expect("chain verifies");
     }
 
@@ -1125,6 +1473,7 @@ mod tests {
                 i1,
                 Principal::System,
                 None,
+                CapabilityMask::SYSTEM,
                 Tick(0),
                 TypeCode(100),
                 Vec::new(),
@@ -1142,9 +1491,12 @@ mod tests {
         // `Kernel::from_snapshot` (persist::snapshot).
         let _i2 = k2.create_instance(InstanceConfig::default());
         let report = replay_into(&mut k2, &wal).expect("replay ok");
-        assert_eq!(report.records_replayed, 4);
-        let replayed_tip = k2.wal_chain_tip().unwrap();
-        assert_eq!(replayed_tip, original_tip);
+        // 4 admitted actions → 4 Submit + 4 Step records re-driven.
+        assert_eq!(report.submits_replayed, 4);
+        assert_eq!(report.steps_replayed, 4);
+        // The tip is MEASURED by replay's own header-rebuilt writer (replay
+        // does not write back into k2's attached WAL), and must equal the
+        // original sealed tip — the A1 D1-Total bit-identity witness.
         assert_eq!(report.final_chain_tip, original_tip);
     }
 
@@ -1161,6 +1513,7 @@ mod tests {
             i2,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(100),
             Vec::new(),
@@ -1170,6 +1523,7 @@ mod tests {
             i1,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(100),
             Vec::new(),
@@ -1197,6 +1551,7 @@ mod tests {
             i1,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(100),
             Vec::new(),
@@ -1206,6 +1561,7 @@ mod tests {
             i2,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(100),
             Vec::new(),
@@ -1244,13 +1600,15 @@ mod tests {
             i,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(100),
             Vec::new(),
         )
         .unwrap();
         let _ = k.step(Tick(1), CapabilityMask::SYSTEM);
-        assert_eq!(k.stats().wal_record_count, 1);
+        // One Submit + one Step record.
+        assert_eq!(k.stats().wal_record_count, 2);
     }
 
     // ---- force_unload ----
@@ -1285,13 +1643,21 @@ mod tests {
     fn force_unload_removes_inflight_refs() {
         let mut k = Kernel::new();
         k.register_action::<SignalAction>();
-        let inst = k.create_instance(InstanceConfig::default());
-        // SignalAction emits Op::SendSignal { route: RouteId(1) } — needs SYSTEM
-        // cap to pass authorize, then dispatch increments inflight_refs[RouteId(1)].
+        // SendSignal needs SYSTEM in the action's effective caps. Under the
+        // unified model a System principal is bounded by `default_caps`, so the
+        // instance must grant it (no blanket bypass).
+        let inst = k.create_instance(InstanceConfig {
+            default_caps: CapabilityMask::SYSTEM,
+            ..Default::default()
+        });
+        // SignalAction emits Op::SendSignal { target: self, route: RouteId(1) };
+        // the post-step router delivers it into the inbox and credits
+        // inflight_refs[RouteId(1)] at delivery (not speculatively at dispatch).
         k.submit(
             inst,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(102),
             Vec::new(),
@@ -1327,11 +1693,15 @@ mod tests {
         k.register_action::<SignalAction>();
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         k.register_observer(Box::new(ForceUnloadCapture { seen: seen.clone() }));
-        let inst = k.create_instance(InstanceConfig::default());
+        let inst = k.create_instance(InstanceConfig {
+            default_caps: CapabilityMask::SYSTEM,
+            ..Default::default()
+        });
         k.submit(
             inst,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(102),
             Vec::new(),
@@ -1354,6 +1724,261 @@ mod tests {
             .force_unload(RouteId(99), CapabilityMask::ADMIN_UNLOAD)
             .expect("admin_unload caps");
         assert_eq!(dropped, 0);
+    }
+
+    // ---- CIL signal routing + unified capability model ----
+
+    /// Sends two signals to instance 1 on route 1 (queue-full exercise).
+    #[derive(Serialize, Deserialize)]
+    struct SignalTwiceAction;
+    impl Sealed for SignalTwiceAction {}
+    impl ActionDeriv for SignalTwiceAction {
+        const TYPE_CODE: TypeCode = TypeCode(110);
+        const SCHEMA_VERSION: u32 = 1;
+    }
+    impl ActionCompute for SignalTwiceAction {
+        fn compute(&self, _ctx: &ActionContext) -> Vec<Op> {
+            let one = || Op::SendSignal {
+                target: InstanceId::new(1).unwrap(),
+                route: RouteId(1),
+                payload: Bytes::new(),
+            };
+            vec![one(), one()]
+        }
+    }
+
+    /// Sends a signal to a nonexistent instance (target-not-found exercise).
+    #[derive(Serialize, Deserialize)]
+    struct SignalMissingAction;
+    impl Sealed for SignalMissingAction {}
+    impl ActionDeriv for SignalMissingAction {
+        const TYPE_CODE: TypeCode = TypeCode(111);
+        const SCHEMA_VERSION: u32 = 1;
+    }
+    impl ActionCompute for SignalMissingAction {
+        fn compute(&self, _ctx: &ActionContext) -> Vec<Op> {
+            vec![Op::SendSignal {
+                target: InstanceId::new(99).unwrap(),
+                route: RouteId(1),
+                payload: Bytes::new(),
+            }]
+        }
+    }
+
+    /// Schedules a `SignalAction` child for tick 1 (cap time-shift exercise).
+    #[derive(Serialize, Deserialize)]
+    struct ScheduleSignalChildAction;
+    impl Sealed for ScheduleSignalChildAction {}
+    impl ActionDeriv for ScheduleSignalChildAction {
+        const TYPE_CODE: TypeCode = TypeCode(112);
+        const SCHEMA_VERSION: u32 = 1;
+    }
+    impl ActionCompute for ScheduleSignalChildAction {
+        fn compute(&self, _ctx: &ActionContext) -> Vec<Op> {
+            vec![Op::ScheduleAction {
+                at: Tick(1),
+                actor: None,
+                action_type_code: SignalAction::TYPE_CODE,
+                action_bytes: Bytes::from_static(b""),
+            }]
+        }
+    }
+
+    #[derive(Default)]
+    struct SignalEventCounters {
+        delivered: AtomicU32,
+        dropped_not_found: AtomicU32,
+        dropped_queue_full: AtomicU32,
+    }
+    struct SignalEventCapture {
+        c: Arc<SignalEventCounters>,
+    }
+    impl KernelObserver for SignalEventCapture {
+        fn on_event(&self, event: &KernelEvent) {
+            match event {
+                KernelEvent::SignalDelivered { .. } => {
+                    self.c.delivered.fetch_add(1, Ordering::SeqCst);
+                }
+                KernelEvent::SignalDropped { reason, .. } => match reason {
+                    crate::runtime::event::SignalDropReason::TargetNotFound => {
+                        self.c.dropped_not_found.fetch_add(1, Ordering::SeqCst);
+                    }
+                    crate::runtime::event::SignalDropReason::QueueFull => {
+                        self.c.dropped_queue_full.fetch_add(1, Ordering::SeqCst);
+                    }
+                    crate::runtime::event::SignalDropReason::Cancelled => {}
+                },
+                // Exhaustive (no catch-all `_`) so a new KernelEvent variant
+                // forces a conscious decision here — the file's convention.
+                KernelEvent::ActionExecuted { .. }
+                | KernelEvent::ActionFailed { .. }
+                | KernelEvent::EffectFailed { .. }
+                | KernelEvent::ObserverPanic { .. }
+                | KernelEvent::ObserverEvicted { .. }
+                | KernelEvent::ModuleForceUnloaded { .. }
+                | KernelEvent::ActionDeferredToNextTick { .. }
+                | KernelEvent::ObserversFlushed { .. }
+                | KernelEvent::DomainEventEmitted { .. } => {}
+            }
+        }
+    }
+
+    fn cfg_sys() -> InstanceConfig {
+        InstanceConfig {
+            default_caps: CapabilityMask::SYSTEM,
+            max_inbox_per_route: 8,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn system_no_longer_blanket_bypasses() {
+        // A System action whose instance does NOT grant SYSTEM in default_caps
+        // cannot SendSignal — System is gated by effective_caps, not bypassed.
+        let mut k = Kernel::new();
+        k.register_action::<SignalAction>();
+        let inst = k.create_instance(InstanceConfig::default()); // default_caps empty
+        k.submit(
+            inst,
+            Principal::System,
+            None,
+            CapabilityMask::SYSTEM,
+            Tick(0),
+            TypeCode(102),
+            Vec::new(),
+        )
+        .unwrap();
+        let report = k.step(Tick(0), CapabilityMask::SYSTEM);
+        assert_eq!(
+            report.effects_denied, 1,
+            "System SendSignal denied when default_caps withholds SYSTEM"
+        );
+        assert_eq!(report.effects_applied, 0);
+    }
+
+    #[test]
+    fn signal_delivered_routes_to_inbox() {
+        let mut k = Kernel::new();
+        k.register_action::<SignalAction>();
+        let counters = Arc::new(SignalEventCounters::default());
+        k.register_observer(Box::new(SignalEventCapture {
+            c: counters.clone(),
+        }));
+        let inst = k.create_instance(cfg_sys());
+        k.submit(
+            inst,
+            Principal::System,
+            None,
+            CapabilityMask::SYSTEM,
+            Tick(0),
+            TypeCode(102),
+            Vec::new(),
+        )
+        .unwrap();
+        let report = k.step(Tick(0), CapabilityMask::SYSTEM);
+        assert_eq!(report.effects_applied, 1);
+        let target = k.instances.get(&inst).unwrap();
+        assert_eq!(target.inbox_len(RouteId(1)), 1);
+        assert_eq!(target.inflight_refs_for(RouteId(1)), 1);
+        assert_eq!(counters.delivered.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn signal_dropped_target_not_found() {
+        let mut k = Kernel::new();
+        k.register_action::<SignalMissingAction>();
+        let counters = Arc::new(SignalEventCounters::default());
+        k.register_observer(Box::new(SignalEventCapture {
+            c: counters.clone(),
+        }));
+        let inst = k.create_instance(cfg_sys());
+        k.submit(
+            inst,
+            Principal::System,
+            None,
+            CapabilityMask::SYSTEM,
+            Tick(0),
+            TypeCode(111),
+            Vec::new(),
+        )
+        .unwrap();
+        let report = k.step(Tick(0), CapabilityMask::SYSTEM);
+        // The op is applied (authorized + dispatched); the DROP happens at the
+        // delivery router (no target), so no inbox and no refcount anywhere.
+        assert_eq!(report.effects_applied, 1);
+        assert_eq!(counters.dropped_not_found.load(Ordering::SeqCst), 1);
+        assert_eq!(counters.delivered.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            k.instances.get(&inst).unwrap().inflight_refs_for(RouteId(1)),
+            0
+        );
+    }
+
+    #[test]
+    fn signal_dropped_queue_full() {
+        let mut k = Kernel::new();
+        k.register_action::<SignalTwiceAction>();
+        let counters = Arc::new(SignalEventCounters::default());
+        k.register_observer(Box::new(SignalEventCapture {
+            c: counters.clone(),
+        }));
+        // Inbox capacity 1: first signal delivered, second dropped (QueueFull).
+        let inst = k.create_instance(InstanceConfig {
+            default_caps: CapabilityMask::SYSTEM,
+            max_inbox_per_route: 1,
+            ..Default::default()
+        });
+        k.submit(
+            inst,
+            Principal::System,
+            None,
+            CapabilityMask::SYSTEM,
+            Tick(0),
+            TypeCode(110),
+            Vec::new(),
+        )
+        .unwrap();
+        let _ = k.step(Tick(0), CapabilityMask::SYSTEM);
+        assert_eq!(counters.delivered.load(Ordering::SeqCst), 1);
+        assert_eq!(counters.dropped_queue_full.load(Ordering::SeqCst), 1);
+        let target = k.instances.get(&inst).unwrap();
+        assert_eq!(target.inbox_len(RouteId(1)), 1, "exactly one fit the inbox");
+        assert_eq!(target.inflight_refs_for(RouteId(1)), 1);
+    }
+
+    #[test]
+    fn cap_time_shift_unrepresentable() {
+        // A scheduling parent cannot bake elevated caps into a future child:
+        // the child's effective caps are re-resolved at execution under the
+        // CURRENT operator session ceiling. Parent schedules a SendSignal child
+        // while the session grants SYSTEM; when the child later runs under an
+        // empty session, its SendSignal is denied — no time-shifted escalation.
+        let mut k = Kernel::new();
+        k.register_action::<ScheduleSignalChildAction>();
+        k.register_action::<SignalAction>();
+        let inst = k.create_instance(cfg_sys());
+        k.submit(
+            inst,
+            Principal::System,
+            None,
+            CapabilityMask::SYSTEM,
+            Tick(0),
+            TypeCode(112),
+            Vec::new(),
+        )
+        .unwrap();
+        // tick 0, full session: parent schedules the child.
+        let r0 = k.step(Tick(0), CapabilityMask::SYSTEM);
+        assert_eq!(r0.effects_applied, 1);
+        // tick 1, EMPTY session: the child SendSignal is denied.
+        let r1 = k.step(Tick(1), CapabilityMask::empty());
+        assert_eq!(r1.actions_executed, 1, "child popped");
+        assert_eq!(r1.effects_applied, 0, "child SendSignal denied under narrowed session");
+        assert_eq!(
+            k.instances.get(&inst).unwrap().inbox_len(RouteId(1)),
+            0,
+            "no signal delivered — caps could not be time-shifted"
+        );
     }
 
     // ---- memory_budget_bytes enforcement (A21) ----
@@ -1446,6 +2071,7 @@ mod tests {
             inst,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             SetCompAction::TYPE_CODE,
             bytes,
@@ -1514,6 +2140,7 @@ mod tests {
             inst,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TwoSetCompAction::TYPE_CODE,
             bytes,
@@ -1590,6 +2217,7 @@ mod tests {
                 KernelEvent::ObserverPanic { .. }
                 | KernelEvent::ObserverEvicted { .. }
                 | KernelEvent::SignalDropped { .. }
+                | KernelEvent::SignalDelivered { .. }
                 | KernelEvent::ModuleForceUnloaded { .. }
                 | KernelEvent::ActionDeferredToNextTick { .. }
                 | KernelEvent::ObserversFlushed { .. } => {
@@ -1623,6 +2251,7 @@ mod tests {
             inst,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(101),
             Vec::new(),
@@ -1650,6 +2279,7 @@ mod tests {
             inst,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(101),
             Vec::new(),
@@ -1677,6 +2307,7 @@ mod tests {
             inst,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(101),
             Vec::new(),
@@ -1712,6 +2343,7 @@ mod tests {
             inst,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(101),
             Vec::new(),
@@ -1741,6 +2373,7 @@ mod tests {
             inst,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             TypeCode(101),
             Vec::new(),

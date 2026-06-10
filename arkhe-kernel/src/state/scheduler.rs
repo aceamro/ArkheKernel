@@ -16,7 +16,7 @@ use core::num::NonZeroU64;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::abi::{EntityId, Principal, Tick, TypeCode};
+use crate::abi::{CapabilityMask, EntityId, Principal, Tick, TypeCode};
 
 /// Sentinel-free scheduled-action handle (A6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -59,6 +59,16 @@ pub(crate) struct ScheduledEntry {
     /// Canonical bytes (postcard); deserialization through `ActionRegistry`
     /// happens at dispatch time.
     pub action_bytes: Vec<u8>,
+    /// Capability ceiling inherited from the scheduling context: the
+    /// effective caps under which the parent action ran. When this entry
+    /// pops, its effective caps are intersected with this ceiling, so a
+    /// scheduled action can only ever hold *less* authority than its
+    /// scheduler — privilege never widens across a schedule (closes the
+    /// time-shifted-escalation channel). An externally-submitted root is
+    /// scheduled with an all-permissive ceiling; its real bound is the
+    /// `caps_at_submit` recorded on its WAL Submit record. Snapshot-wire
+    /// only (schedules are not per-record WAL state under the CIL model).
+    pub caps_ceiling: CapabilityMask,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,12 +93,18 @@ impl Scheduler {
         }
     }
 
-    /// Insert into `ready` + `by_id` + `by_actor` atomically.
+    /// Insert into `ready` + `by_id` + `by_actor` atomically, auto-allocating
+    /// the next monotonic id. Production paths (`Kernel::submit`, the apply
+    /// commit) pre-allocate the id and use [`schedule_with_id`](Self::schedule_with_id)
+    /// so the id is decided once and reproduced on replay; this auto-id form
+    /// exercises the allocator directly under test.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn schedule(
         &mut self,
         at: Tick,
         actor: Option<EntityId>,
         principal: Principal,
+        caps_ceiling: CapabilityMask,
         type_code: TypeCode,
         bytes: Vec<u8>,
     ) -> ScheduledActionId {
@@ -111,6 +127,7 @@ impl Scheduler {
             principal,
             action_type_code: type_code,
             action_bytes: bytes,
+            caps_ceiling,
         };
 
         self.ready.insert(key, entry);
@@ -125,12 +142,14 @@ impl Scheduler {
     /// Schedule with a caller-provided `id` (e.g. when Kernel pre-allocates
     /// the ScheduledActionId so it can be returned from `submit`). Internal
     /// `next_id` is bumped so future auto-allocations stay monotonic.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn schedule_with_id(
         &mut self,
         id: ScheduledActionId,
         at: Tick,
         actor: Option<EntityId>,
         principal: Principal,
+        caps_ceiling: CapabilityMask,
         type_code: TypeCode,
         bytes: Vec<u8>,
     ) {
@@ -149,6 +168,7 @@ impl Scheduler {
             principal,
             action_type_code: type_code,
             action_bytes: bytes,
+            caps_ceiling,
         };
 
         self.ready.insert(key, entry);
@@ -301,6 +321,9 @@ mod tests {
     fn p() -> Principal {
         Principal::System
     }
+    fn caps() -> CapabilityMask {
+        CapabilityMask::all()
+    }
     fn tc() -> TypeCode {
         TypeCode(1)
     }
@@ -315,7 +338,7 @@ mod tests {
     #[test]
     fn schedule_then_pop_due_single() {
         let mut s = Scheduler::new();
-        let id = s.schedule(Tick(5), None, p(), tc(), vec![1, 2, 3]);
+        let id = s.schedule(Tick(5), None, p(), caps(), tc(), vec![1, 2, 3]);
         assert_eq!(s.len(), 1);
         let entry = s.pop_due(Tick(5)).expect("entry due");
         assert_eq!(entry.id, id);
@@ -327,7 +350,7 @@ mod tests {
     #[test]
     fn pop_due_before_time_returns_none() {
         let mut s = Scheduler::new();
-        s.schedule(Tick(10), None, p(), tc(), vec![]);
+        s.schedule(Tick(10), None, p(), caps(), tc(), vec![]);
         assert!(s.pop_due(Tick(9)).is_none());
         assert_eq!(s.len(), 1);
     }
@@ -335,16 +358,16 @@ mod tests {
     #[test]
     fn pop_due_at_exact_tick_pops() {
         let mut s = Scheduler::new();
-        let id = s.schedule(Tick(5), None, p(), tc(), vec![]);
+        let id = s.schedule(Tick(5), None, p(), caps(), tc(), vec![]);
         assert_eq!(s.pop_due(Tick(5)).unwrap().id, id);
     }
 
     #[test]
     fn pop_due_ordering_by_tick() {
         let mut s = Scheduler::new();
-        let id_late = s.schedule(Tick(20), None, p(), tc(), vec![]);
-        let id_early = s.schedule(Tick(5), None, p(), tc(), vec![]);
-        let id_mid = s.schedule(Tick(10), None, p(), tc(), vec![]);
+        let id_late = s.schedule(Tick(20), None, p(), caps(), tc(), vec![]);
+        let id_early = s.schedule(Tick(5), None, p(), caps(), tc(), vec![]);
+        let id_mid = s.schedule(Tick(10), None, p(), caps(), tc(), vec![]);
         assert_eq!(s.pop_due(Tick(100)).unwrap().id, id_early);
         assert_eq!(s.pop_due(Tick(100)).unwrap().id, id_mid);
         assert_eq!(s.pop_due(Tick(100)).unwrap().id, id_late);
@@ -353,9 +376,9 @@ mod tests {
     #[test]
     fn pop_due_tiebreak_by_seq() {
         let mut s = Scheduler::new();
-        let id1 = s.schedule(Tick(5), None, p(), tc(), vec![1]);
-        let id2 = s.schedule(Tick(5), None, p(), tc(), vec![2]);
-        let id3 = s.schedule(Tick(5), None, p(), tc(), vec![3]);
+        let id1 = s.schedule(Tick(5), None, p(), caps(), tc(), vec![1]);
+        let id2 = s.schedule(Tick(5), None, p(), caps(), tc(), vec![2]);
+        let id3 = s.schedule(Tick(5), None, p(), caps(), tc(), vec![3]);
         assert_eq!(s.pop_due(Tick(5)).unwrap().id, id1);
         assert_eq!(s.pop_due(Tick(5)).unwrap().id, id2);
         assert_eq!(s.pop_due(Tick(5)).unwrap().id, id3);
@@ -364,7 +387,7 @@ mod tests {
     #[test]
     fn cancel_removes_entry() {
         let mut s = Scheduler::new();
-        let id = s.schedule(Tick(5), None, p(), tc(), vec![]);
+        let id = s.schedule(Tick(5), None, p(), caps(), tc(), vec![]);
         let cancelled = s.cancel(id).expect("found");
         assert_eq!(cancelled.id, id);
         assert!(s.is_empty());
@@ -383,9 +406,9 @@ mod tests {
         let mut s = Scheduler::new();
         let actor = EntityId::new(1).unwrap();
         let other = EntityId::new(2).unwrap();
-        let _ = s.schedule(Tick(5), Some(actor), p(), tc(), vec![]);
-        let _ = s.schedule(Tick(10), Some(actor), p(), tc(), vec![]);
-        let id_other = s.schedule(Tick(7), Some(other), p(), tc(), vec![]);
+        let _ = s.schedule(Tick(5), Some(actor), p(), caps(), tc(), vec![]);
+        let _ = s.schedule(Tick(10), Some(actor), p(), caps(), tc(), vec![]);
+        let id_other = s.schedule(Tick(7), Some(other), p(), caps(), tc(), vec![]);
         assert_eq!(s.len(), 3);
         let cancelled = s.cancel_by_actor(actor);
         assert_eq!(cancelled.len(), 2);
@@ -403,9 +426,9 @@ mod tests {
     #[test]
     fn schedule_id_monotonic() {
         let mut s = Scheduler::new();
-        let id1 = s.schedule(Tick(0), None, p(), tc(), vec![]);
-        let id2 = s.schedule(Tick(0), None, p(), tc(), vec![]);
-        let id3 = s.schedule(Tick(0), None, p(), tc(), vec![]);
+        let id1 = s.schedule(Tick(0), None, p(), caps(), tc(), vec![]);
+        let id2 = s.schedule(Tick(0), None, p(), caps(), tc(), vec![]);
+        let id3 = s.schedule(Tick(0), None, p(), caps(), tc(), vec![]);
         assert!(id1 < id2);
         assert!(id2 < id3);
         assert_eq!(id1.get(), 1);
@@ -416,8 +439,8 @@ mod tests {
     fn no_tombstones() {
         // After cancel, len decrements immediately — no lazy deletion.
         let mut s = Scheduler::new();
-        let id1 = s.schedule(Tick(5), None, p(), tc(), vec![]);
-        let _id2 = s.schedule(Tick(5), None, p(), tc(), vec![]);
+        let id1 = s.schedule(Tick(5), None, p(), caps(), tc(), vec![]);
+        let _id2 = s.schedule(Tick(5), None, p(), caps(), tc(), vec![]);
         assert_eq!(s.len(), 2);
         s.cancel(id1);
         assert_eq!(s.len(), 1);
@@ -427,10 +450,10 @@ mod tests {
     fn determinism_same_sequence() {
         fn run() -> Vec<u64> {
             let mut s = Scheduler::new();
-            s.schedule(Tick(3), None, p(), tc(), vec![]);
-            s.schedule(Tick(1), None, p(), tc(), vec![]);
-            s.schedule(Tick(2), None, p(), tc(), vec![]);
-            s.schedule(Tick(1), None, p(), tc(), vec![]);
+            s.schedule(Tick(3), None, p(), caps(), tc(), vec![]);
+            s.schedule(Tick(1), None, p(), caps(), tc(), vec![]);
+            s.schedule(Tick(2), None, p(), caps(), tc(), vec![]);
+            s.schedule(Tick(1), None, p(), caps(), tc(), vec![]);
             let mut out = Vec::new();
             while let Some(e) = s.pop_due(Tick(100)) {
                 out.push(e.id.get());
@@ -443,16 +466,16 @@ mod tests {
     #[test]
     fn validate_accepts_consistent_scheduler() {
         let mut s = Scheduler::new();
-        s.schedule(Tick(5), Some(EntityId::new(1).unwrap()), p(), tc(), vec![1]);
-        s.schedule(Tick(3), None, p(), tc(), vec![2]);
-        s.schedule(Tick(5), Some(EntityId::new(1).unwrap()), p(), tc(), vec![3]);
+        s.schedule(Tick(5), Some(EntityId::new(1).unwrap()), p(), caps(), tc(), vec![1]);
+        s.schedule(Tick(3), None, p(), caps(), tc(), vec![2]);
+        s.schedule(Tick(5), Some(EntityId::new(1).unwrap()), p(), caps(), tc(), vec![3]);
         assert!(s.validate().is_ok());
     }
 
     #[test]
     fn validate_rejects_broken_ready_by_id_bijection() {
         let mut s = Scheduler::new();
-        s.schedule(Tick(5), None, p(), tc(), vec![1]);
+        s.schedule(Tick(5), None, p(), caps(), tc(), vec![1]);
         s.by_id.clear(); // ready holds an entry with no by_id mapping
         assert!(s.validate().is_err());
     }
@@ -460,7 +483,7 @@ mod tests {
     #[test]
     fn validate_rejects_missing_by_actor_index() {
         let mut s = Scheduler::new();
-        s.schedule(Tick(5), Some(EntityId::new(1).unwrap()), p(), tc(), vec![1]);
+        s.schedule(Tick(5), Some(EntityId::new(1).unwrap()), p(), caps(), tc(), vec![1]);
         s.by_actor.clear(); // actor-owned entry no longer indexed
         assert!(s.validate().is_err());
     }

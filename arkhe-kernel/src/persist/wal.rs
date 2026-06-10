@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::abi::{EntityId, InstanceId, Principal, Tick, TypeCode};
-use crate::runtime::stage::StepStage;
+use crate::state::ScheduledActionId;
 
 use super::signature::{SignatureClass, VerifierClass};
 
@@ -68,114 +68,249 @@ impl WalHeader {
     /// Magic bytes used at the head of the encoded WAL.
     pub const MAGIC: [u8; 8] = *b"ARKHEWAL";
     /// Kernel semver pinned by [`WalWriter::new`].
-    pub const CURRENT_KERNEL_SEMVER: (u16, u16, u16) = (0, 14, 0);
+    pub const CURRENT_KERNEL_SEMVER: (u16, u16, u16) = (0, 15, 0);
     /// ABI semver pinned by [`WalWriter::new`].
-    pub const ABI_VERSION: (u16, u16) = (0, 14);
+    pub const ABI_VERSION: (u16, u16) = (0, 15);
     /// Postcard major version pinned by [`WalWriter::new`].
     pub const POSTCARD_MAJOR: u32 = 1;
     /// BLAKE3 major version pinned by [`WalWriter::new`].
     pub const BLAKE3_MAJOR: u32 = 1;
     /// Domain-separation byte string fed into `blake3::derive_key` to
-    /// produce the WAL chain key. The "v0.14" anchor pins the chain
+    /// produce the WAL chain key. The "v0.15" anchor pins the chain
     /// epoch; it advances with a release whose persisted wire format
-    /// changes (the v0.13 → v0.14 ML-DSA stabilization being the first
-    /// such advance). Any change rederives every chain key and
-    /// invalidates all prior-epoch WAL chains (Layer A item 1
-    /// byte-identity invariant — A1/A14).
-    pub const DOMAIN_CTX: &'static [u8] = b"arkhe-kernel v0.14 WAL chain domain separation context";
+    /// changes. The v0.15 epoch restructures `WalRecordBody` into the
+    /// Canonical Input Log (Submit/Step records, effects re-derived on
+    /// replay), so the chain key rederives and all prior-epoch (v0.14)
+    /// WAL chains are not replayable under v0.15 (Layer A item 1
+    /// byte-identity invariant — A1/A14; forward-only, pre-public).
+    pub const DOMAIN_CTX: &'static [u8] = b"arkhe-kernel v0.15 WAL chain domain separation context";
 }
 
-/// One-byte annotation summarizing whether every Op in the record's
-/// stage authorized cleanly. Belt-and-suspenders companion to the
-/// chain hash (belt-and-suspenders companion).
+/// Which fact a [`WalRecord`] captures under the Canonical Input Log
+/// model: an exogenous external submission, or a per-pop step verdict.
+/// The kind is the serde variant tag — the first byte of the hashed body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WalRecordKind {
+    /// An external action was admitted into an instance's scheduler.
+    Submit,
+    /// One scheduled action was popped and executed (or denied/skipped).
+    Step,
+}
+
+/// Outcome of a single `step_one` pop, recorded on a `Step` record. Replay
+/// re-reaches the same verdict by re-execution; a mismatch fails fast.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[repr(u8)]
-pub enum AuthDecisionAnnotation {
-    /// Every Op authorized.
-    AllAuthorized = 0,
-    /// At least one Op was denied.
-    SomeDenied = 1,
+pub enum StepVerdict {
+    /// Every Op authorized and the stage committed.
+    Committed,
+    /// An Op failed authorization; the whole stage rolled back.
+    AuthDenied,
+    /// Authorized, but per-Op budget/quota gates skipped `denied` Ops
+    /// (partial commit — the committed siblings still applied).
+    BudgetPartial {
+        /// Number of Ops the per-Op gates skipped this step.
+        denied: u32,
+    },
+    /// The popped action did not run (unregistered type or undeserializable
+    /// bytes). No state changed.
+    Skipped {
+        /// Why the action was skipped.
+        reason: SkipReason,
+    },
 }
 
-/// Single committed step recorded in the WAL.
+/// Why a popped action produced no execution (a `Skipped` verdict).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SkipReason {
+    /// No `ActionRegistry` entry for the action's `TypeCode`.
+    Unregistered,
+    /// The action bytes failed to deserialize under the registered schema.
+    DeserFailed,
+}
+
+/// Kind-discriminated canonical content of a WAL record. The serde variant
+/// tag is the record [`WalRecordKind`] and the first hashed body field. The
+/// CIL records only non-reproducible facts: exogenous submissions and
+/// per-step verdicts + post-state digest — every deterministic effect
+/// (child schedules, signal routing, internal ids) is re-derived on replay.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WalRecordContent {
+    /// Exogenous admission of an external action — the only non-reproducible
+    /// scheduling input (internal `Op::ScheduleAction` schedules are
+    /// re-derived by re-executing the parent, never logged).
+    Submit {
+        /// Monotonic record sequence within this WAL.
+        seq: u64,
+        /// Instance the action was submitted to.
+        instance: InstanceId,
+        /// Principal the external caller submitted under.
+        principal: Principal,
+        /// Submitting entity, if any (feeds `ActionContext::actor`, so it is
+        /// canonical input and chain-hashed).
+        actor: Option<EntityId>,
+        /// Capability ceiling granted to this submission — bounds the
+        /// action's effective caps at execution (replay reconstructs it).
+        caps_at_submit: u64,
+        /// Tick the action is scheduled for.
+        at: Tick,
+        /// Type code of the submitted action.
+        action_type_code: TypeCode,
+        /// Canonical action bytes (replay deserializes from these).
+        action_bytes: Vec<u8>,
+        /// ScheduledActionId the kernel minted — replay re-injects with this
+        /// exact id so the id sequence is reproduced verbatim.
+        allocated_id: ScheduledActionId,
+    },
+    /// One `step_one` pop: which entry ran, when, under what operator session
+    /// ceiling, with what verdict, and the full-state digest afterward (the
+    /// bit-identity witness).
+    Step {
+        /// Monotonic record sequence within this WAL.
+        seq: u64,
+        /// Instance the step ran against.
+        instance: InstanceId,
+        /// ScheduledActionId popped this step (scheduler-order witness).
+        popped_id: ScheduledActionId,
+        /// Tick the step ran at.
+        now: Tick,
+        /// Operator session capability ceiling in force at step time — the
+        /// final intersection applied over the action's resolved caps. It is
+        /// a non-reproducible per-step operator input (like `caps_at_submit`
+        /// is per submission), so it is recorded for the verdict to be
+        /// re-derivable on replay.
+        session_caps: u64,
+        /// Step outcome — replay must re-reach this exact verdict.
+        verdict: StepVerdict,
+        /// BLAKE3 digest of the instance's full post-step state; replay
+        /// measures the replayed instance and asserts equality (A1).
+        post_state_digest: [u8; 32],
+    },
+}
+
+/// Single record in the WAL chain (Canonical Input Log). Carries the
+/// kind-discriminated [`WalRecordContent`] plus the chain/signature fields
+/// common to both kinds.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalRecord {
-    /// Monotonic record sequence within this WAL.
-    pub seq: u64,
-    /// Tick at which the producing `step()` ran.
-    pub at: Tick,
-    /// Instance the action ran against.
-    pub instance: InstanceId,
-    /// Principal under which the action was submitted.
-    pub principal: Principal,
-    /// Submitting entity (the `actor` passed to `submit`), if any. Part of
-    /// the canonical input — it feeds `ActionContext::actor` during
-    /// `compute()` — so it MUST be persisted AND chain-hashed (it is a
-    /// `WalRecordBody` field) to keep replay bit-identical (A1) for any
-    /// module that branches on `ctx.actor`.
-    pub actor: Option<EntityId>,
-    /// Type code of the executed action.
-    pub action_type_code: TypeCode,
-    /// Canonical action bytes (replay deserializes from these).
-    pub action_bytes: Vec<u8>,
-    /// `CapabilityMask` bits in effect during `step()`.
-    pub caps_bits: u64,
-    pub(crate) stage: StepStage,
-    /// Auth-decision summary for this step's Ops.
-    pub auth_decision: AuthDecisionAnnotation,
+    /// Kind-discriminated canonical content (its variant tag is the kind).
+    pub content: WalRecordContent,
     /// Previous record's `this_chain_hash` (or zero for record 0).
     pub prev_chain_hash: [u8; 32],
     /// `blake3::keyed(chain_key, prev_chain_hash || canonical(body))`.
     pub this_chain_hash: [u8; 32],
-    /// Ed25519 signature over the canonical `WalRecordBody` bytes
-    /// (the same bytes hashed into `this_chain_hash`). `None` when the
-    /// owning WAL was created with `SignatureClass::None`. Stored as
-    /// `Vec<u8>` (always exactly 64 bytes when present) because serde's
-    /// array deserializer caps at 32 — same workaround as the header's
-    /// `domain_separation_context`.
+    /// Ed25519 signature over the canonical body bytes (same bytes hashed
+    /// into `this_chain_hash`). `None` for Tier 1. Stored as `Vec<u8>`
+    /// (64 bytes when present) per the serde 32-byte array-deserializer cap.
     pub signature: Option<Vec<u8>>,
-    /// PQC signature bytes for Hybrid signing modes (envelope slot for
-    /// ML-DSA 65 or other PQC algorithms). Paired with `signature` for
-    /// dual-sign verification under Hybrid policy. `None` for non-Hybrid
-    /// configurations. Stored as `Vec<u8>` because PQC signatures exceed
-    /// the serde 32-byte fixed-array limit (ML-DSA 65 signature = 3309
-    /// bytes).
+    /// PQC signature bytes for Hybrid mode (3309 bytes for ML-DSA 65 when
+    /// present); `None` otherwise.
     pub signature_pqc: Option<Vec<u8>>,
 }
 
+impl WalRecord {
+    /// This record's monotonic sequence (kind-agnostic).
+    pub fn seq(&self) -> u64 {
+        match &self.content {
+            WalRecordContent::Submit { seq, .. } | WalRecordContent::Step { seq, .. } => *seq,
+        }
+    }
+
+    /// This record's [`WalRecordKind`].
+    pub fn kind(&self) -> WalRecordKind {
+        match &self.content {
+            WalRecordContent::Submit { .. } => WalRecordKind::Submit,
+            WalRecordContent::Step { .. } => WalRecordKind::Step,
+        }
+    }
+}
+
+/// Borrowed canonical body — the bytes hashed into `this_chain_hash` and
+/// signed. The serde variant tag of `content` is the record kind (first
+/// hashed field); `prev_chain_hash` is folded in so reordering records
+/// breaks the chain.
 #[derive(Serialize)]
 struct WalRecordBody<'a> {
-    seq: u64,
-    at: Tick,
-    instance: InstanceId,
-    principal: &'a Principal,
-    actor: Option<EntityId>,
-    action_type_code: TypeCode,
-    action_bytes: &'a [u8],
-    caps_bits: u64,
-    stage: &'a StepStage,
-    auth_decision: AuthDecisionAnnotation,
+    content: WalRecordBodyContent<'a>,
     prev_chain_hash: [u8; 32],
 }
 
+#[derive(Serialize)]
+enum WalRecordBodyContent<'a> {
+    Submit {
+        seq: u64,
+        instance: InstanceId,
+        principal: &'a Principal,
+        actor: Option<EntityId>,
+        caps_at_submit: u64,
+        at: Tick,
+        action_type_code: TypeCode,
+        action_bytes: &'a [u8],
+        allocated_id: ScheduledActionId,
+    },
+    Step {
+        seq: u64,
+        instance: InstanceId,
+        popped_id: ScheduledActionId,
+        now: Tick,
+        session_caps: u64,
+        verdict: StepVerdict,
+        post_state_digest: [u8; 32],
+    },
+}
+
 impl<'a> WalRecordBody<'a> {
-    /// Reconstruct the canonical body view from a stored `WalRecord`
-    /// plus the running `prev_chain_hash` (used by `verify_chain`).
-    /// `append` constructs the body inline because its fields are
-    /// per-field locals at that point — sharing a helper there costs
-    /// readability for no LOC saved.
+    /// Reconstruct the canonical body view from a stored `WalRecord` plus
+    /// the running `prev_chain_hash` (used by `verify_chain`).
     fn from_record(rec: &'a WalRecord, prev: [u8; 32]) -> Self {
+        Self::from_content(&rec.content, prev)
+    }
+
+    /// Borrow a [`WalRecordContent`] as the canonical body view (the bytes
+    /// hashed + signed), folding in `prev` so reordering breaks the chain.
+    /// Used both on append (seal the new record) and on verify.
+    fn from_content(content_ref: &'a WalRecordContent, prev: [u8; 32]) -> Self {
+        let content = match content_ref {
+            WalRecordContent::Submit {
+                seq,
+                instance,
+                principal,
+                actor,
+                caps_at_submit,
+                at,
+                action_type_code,
+                action_bytes,
+                allocated_id,
+            } => WalRecordBodyContent::Submit {
+                seq: *seq,
+                instance: *instance,
+                principal,
+                actor: *actor,
+                caps_at_submit: *caps_at_submit,
+                at: *at,
+                action_type_code: *action_type_code,
+                action_bytes,
+                allocated_id: *allocated_id,
+            },
+            WalRecordContent::Step {
+                seq,
+                instance,
+                popped_id,
+                now,
+                session_caps,
+                verdict,
+                post_state_digest,
+            } => WalRecordBodyContent::Step {
+                seq: *seq,
+                instance: *instance,
+                popped_id: *popped_id,
+                now: *now,
+                session_caps: *session_caps,
+                verdict: *verdict,
+                post_state_digest: *post_state_digest,
+            },
+        };
         Self {
-            seq: rec.seq,
-            at: rec.at,
-            instance: rec.instance,
-            principal: &rec.principal,
-            actor: rec.actor,
-            action_type_code: rec.action_type_code,
-            action_bytes: &rec.action_bytes,
-            caps_bits: rec.caps_bits,
-            stage: &rec.stage,
-            auth_decision: rec.auth_decision,
+            content,
             prev_chain_hash: prev,
         }
     }
@@ -248,6 +383,10 @@ pub struct WalWriter {
     sig_class: SignatureClass,
 }
 
+/// `seal` output: `(this_chain_hash, ed25519_signature, pqc_signature)`. The
+/// two signature slots are `None` for Tier 1 (chain-only).
+type SealedRecordParts = ([u8; 32], Option<Vec<u8>>, Option<Vec<u8>>);
+
 fn build_chain_key(world_id: &[u8; 32]) -> [u8; 32] {
     let ctx = core::str::from_utf8(WalHeader::DOMAIN_CTX).expect("DOMAIN_CTX is valid UTF-8 ASCII");
     blake3::derive_key(ctx, world_id)
@@ -295,60 +434,53 @@ impl WalWriter {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn append(
-        &mut self,
-        at: Tick,
-        instance: InstanceId,
-        principal: Principal,
-        actor: Option<EntityId>,
-        action_type_code: TypeCode,
-        action_bytes: Vec<u8>,
-        caps_bits: u64,
-        stage: StepStage,
-        auth_decision: AuthDecisionAnnotation,
-    ) -> Result<&WalRecord, WalError> {
-        self.next_seq = self.next_seq.saturating_add(1);
-        let body = WalRecordBody {
-            seq: self.next_seq,
-            at,
-            instance,
-            principal: &principal,
-            actor,
-            action_type_code,
-            action_bytes: &action_bytes,
-            caps_bits,
-            stage: &stage,
-            auth_decision,
-            prev_chain_hash: self.prev_hash,
-        };
-        let body_bytes = postcard::to_allocvec(&body)
-            .map_err(|e| WalError::SerializeFailed(format!("{}", e)))?;
+    /// Reconstruct a measurement-only writer from a sealed header: same
+    /// `world_id`-derived chain key, fresh `prev_hash`, no signing. Replay
+    /// uses this to RE-MEASURE the chain tip from the same inputs/verdicts
+    /// (the chain hash is over the body bytes, which exclude the signature,
+    /// so a None-signing rebuild reproduces every `this_chain_hash`).
+    pub(crate) fn rebuild_from_header(header: &WalHeader) -> Self {
+        let chain_key = build_chain_key(&header.world_id);
+        Self {
+            header: header.clone(),
+            records: Vec::new(),
+            next_seq: 0,
+            prev_hash: [0u8; 32],
+            chain_key,
+            sig_class: SignatureClass::None,
+        }
+    }
+
+    /// Hash + sign a borrowed body, returning `(this_chain_hash, sig, pqc)`.
+    /// The hash is `blake3::keyed(chain_key, prev_hash || canonical(body))`;
+    /// signatures (if any) cover the same body bytes.
+    fn seal(&self, body: &WalRecordBody) -> Result<SealedRecordParts, WalError> {
+        let body_bytes =
+            postcard::to_allocvec(body).map_err(|e| WalError::SerializeFailed(format!("{}", e)))?;
         let mut hasher = blake3::Hasher::new_keyed(&self.chain_key);
         hasher.update(&self.prev_hash);
         hasher.update(&body_bytes);
         let this_hash: [u8; 32] = *hasher.finalize().as_bytes();
-
-        // Signatures are over the same body bytes that feed the chain
-        // hash. Tier 1 (None) leaves both `None`. Hybrid emits paired
+        // Tier 1 (None) leaves both `None`. Hybrid emits paired
         // Ed25519 + ML-DSA 65 signatures via `sign_hybrid`.
         let (signature, signature_pqc) = match self.sig_class.sign_hybrid(&body_bytes) {
             Some(hyb) => (Some(hyb.ed25519.to_vec()), Some(hyb.pqc)),
             None => (self.sig_class.sign(&body_bytes).map(|s| s.to_vec()), None),
         };
+        Ok((this_hash, signature, signature_pqc))
+    }
 
+    fn push_sealed(&mut self, content: WalRecordContent) -> Result<&WalRecord, WalError> {
+        let prev = self.prev_hash;
+        // Seal a borrowed body view of `content`; the borrow ends before
+        // `content` is moved into the record below (NLL).
+        let (this_hash, signature, signature_pqc) = {
+            let body = WalRecordBody::from_content(&content, prev);
+            self.seal(&body)?
+        };
         let record = WalRecord {
-            seq: self.next_seq,
-            at,
-            instance,
-            principal,
-            actor,
-            action_type_code,
-            action_bytes,
-            caps_bits,
-            stage,
-            auth_decision,
-            prev_chain_hash: self.prev_hash,
+            content,
+            prev_chain_hash: prev,
             this_chain_hash: this_hash,
             signature,
             signature_pqc,
@@ -356,6 +488,61 @@ impl WalWriter {
         self.records.push(record);
         self.prev_hash = this_hash;
         Ok(self.records.last().expect("just pushed"))
+    }
+
+    /// Append a `Submit` record — the exogenous admission of an external
+    /// action (with the ScheduledActionId the kernel minted for it).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn append_submit(
+        &mut self,
+        instance: InstanceId,
+        principal: Principal,
+        actor: Option<EntityId>,
+        caps_at_submit: u64,
+        at: Tick,
+        action_type_code: TypeCode,
+        action_bytes: Vec<u8>,
+        allocated_id: ScheduledActionId,
+    ) -> Result<&WalRecord, WalError> {
+        self.next_seq = self.next_seq.saturating_add(1);
+        let seq = self.next_seq;
+        let content = WalRecordContent::Submit {
+            seq,
+            instance,
+            principal,
+            actor,
+            caps_at_submit,
+            at,
+            action_type_code,
+            action_bytes,
+            allocated_id,
+        };
+        self.push_sealed(content)
+    }
+
+    /// Append a `Step` record — one `step_one` pop's verdict + the full
+    /// post-step state digest, under the operator session ceiling in force.
+    pub(crate) fn append_step(
+        &mut self,
+        instance: InstanceId,
+        popped_id: ScheduledActionId,
+        now: Tick,
+        session_caps: u64,
+        verdict: StepVerdict,
+        post_state_digest: [u8; 32],
+    ) -> Result<&WalRecord, WalError> {
+        self.next_seq = self.next_seq.saturating_add(1);
+        let seq = self.next_seq;
+        let content = WalRecordContent::Step {
+            seq,
+            instance,
+            popped_id,
+            now,
+            session_caps,
+            verdict,
+            post_state_digest,
+        };
+        self.push_sealed(content)
     }
 
     /// Pinned WAL header.
@@ -659,9 +846,8 @@ impl std::error::Error for WalError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::abi::{EntityId, ExternalId, RouteId};
-    use crate::runtime::stage::{LedgerOp, StagedStateDelta};
-    use crate::state::EntityMeta;
+    use crate::abi::{EntityId, ExternalId, InstanceId, Principal, RouteId, Tick, TypeCode};
+    use crate::state::ScheduledActionId;
 
     fn world() -> [u8; 32] {
         [7u8; 32]
@@ -669,21 +855,42 @@ mod tests {
     fn manifest() -> [u8; 32] {
         [3u8; 32]
     }
+    fn sid(n: u64) -> ScheduledActionId {
+        ScheduledActionId::new(n).unwrap()
+    }
 
-    fn sample_stage() -> StepStage {
-        let mut s = StepStage::default();
-        s.state_ops.push(StagedStateDelta::SpawnEntity {
-            id: EntityId::new(1).unwrap(),
-            meta: EntityMeta {
-                owner: Principal::System,
-                created: Tick(0),
-            },
-        });
-        s.ledger_delta
-            .ops
-            .push(LedgerOp::AddEntity(EntityId::new(1).unwrap()));
-        s.id_counters.next_entity_advance = 1;
-        s
+    /// Append one canonical `Submit` record with fixed inputs.
+    fn submit_one(w: &mut WalWriter) {
+        w.append_submit(
+            InstanceId::new(1).unwrap(),
+            Principal::System,
+            None,
+            0xFF,
+            Tick(0),
+            TypeCode(100),
+            vec![1, 2, 3],
+            sid(1),
+        )
+        .unwrap();
+    }
+
+    /// Append one canonical `Step` record; `n` varies the body so a multi-record
+    /// chain has distinct record bodies.
+    fn step_n(w: &mut WalWriter, n: u8) {
+        w.append_step(
+            InstanceId::new(1).unwrap(),
+            sid(1),
+            Tick(n as u64),
+            0xFF,
+            StepVerdict::Committed,
+            [n; 32],
+        )
+        .unwrap();
+    }
+
+    /// One record used by the signature tests (a `Step`).
+    fn append_one(w: &mut WalWriter) {
+        step_n(w, 1);
     }
 
     #[test]
@@ -698,20 +905,9 @@ mod tests {
     }
 
     #[test]
-    fn single_append_produces_nonzero_chain_tip() {
+    fn single_step_append_produces_nonzero_chain_tip() {
         let mut w = WalWriter::new(world(), manifest());
-        w.append(
-            Tick(5),
-            InstanceId::new(1).unwrap(),
-            Principal::System,
-            None,
-            TypeCode(100),
-            vec![1, 2, 3],
-            0,
-            sample_stage(),
-            AuthDecisionAnnotation::AllAuthorized,
-        )
-        .unwrap();
+        append_one(&mut w);
         let tip = w.chain_tip();
         assert_ne!(tip, [0u8; 32]);
         assert_eq!(w.record_count(), 1);
@@ -721,22 +917,10 @@ mod tests {
     fn multi_record_chain_links_each_record() {
         let mut w = WalWriter::new(world(), manifest());
         for i in 0..5 {
-            w.append(
-                Tick(i),
-                InstanceId::new(1).unwrap(),
-                Principal::System,
-                None,
-                TypeCode(100),
-                vec![i as u8],
-                0,
-                StepStage::default(),
-                AuthDecisionAnnotation::AllAuthorized,
-            )
-            .unwrap();
+            step_n(&mut w, i);
         }
         let wal = Wal::from_writer(w);
         assert_eq!(wal.records.len(), 5);
-        // Each record's prev_chain_hash equals previous record's this_chain_hash.
         let mut prev = [0u8; 32];
         for rec in &wal.records {
             assert_eq!(rec.prev_chain_hash, prev);
@@ -746,55 +930,51 @@ mod tests {
     }
 
     #[test]
-    fn tampered_record_breaks_verify_chain() {
+    fn submit_and_step_chain_verifies() {
+        // A Submit followed by a Step (the canonical admission → execution
+        // sequence) links and verifies.
+        let mut w = WalWriter::new(world(), manifest());
+        submit_one(&mut w);
+        step_n(&mut w, 2);
+        let wal = Wal::from_writer(w);
+        assert_eq!(wal.records.len(), 2);
+        assert!(matches!(wal.records[0].kind(), WalRecordKind::Submit));
+        assert!(matches!(wal.records[1].kind(), WalRecordKind::Step));
+        assert_eq!(wal.records[0].seq(), 1);
+        assert_eq!(wal.records[1].seq(), 2);
+        wal.verify_chain(world()).expect("clean chain");
+    }
+
+    #[test]
+    fn tampered_step_body_breaks_verify_chain() {
         let mut w = WalWriter::new(world(), manifest());
         for i in 0..3 {
-            w.append(
-                Tick(i),
-                InstanceId::new(1).unwrap(),
-                Principal::System,
-                None,
-                TypeCode(100),
-                vec![i as u8],
-                0,
-                StepStage::default(),
-                AuthDecisionAnnotation::AllAuthorized,
-            )
-            .unwrap();
+            step_n(&mut w, i);
         }
         let mut wal = Wal::from_writer(w);
-        // Tamper: overwrite middle record's caps_bits.
-        wal.records[1].caps_bits = 0xDEAD_BEEF;
-        let result = wal.verify_chain(world());
-        assert!(matches!(result, Err(WalError::HashMismatch { .. })));
+        // Tamper the middle record's post_state_digest (a hashed body field).
+        if let WalRecordContent::Step {
+            post_state_digest, ..
+        } = &mut wal.records[1].content
+        {
+            post_state_digest[0] ^= 0xFF;
+        }
+        assert!(matches!(
+            wal.verify_chain(world()),
+            Err(WalError::HashMismatch { .. })
+        ));
     }
 
     #[test]
     fn verify_chain_detects_broken_prev_link() {
         let mut w = WalWriter::new(world(), manifest());
         for i in 0..3 {
-            w.append(
-                Tick(i),
-                InstanceId::new(1).unwrap(),
-                Principal::System,
-                None,
-                TypeCode(100),
-                vec![i as u8],
-                0,
-                StepStage::default(),
-                AuthDecisionAnnotation::AllAuthorized,
-            )
-            .unwrap();
+            step_n(&mut w, i);
         }
         let mut wal = Wal::from_writer(w);
-        // Tamper: break the prev_chain_hash link of record 1 without
-        // touching its body. verify_chain must detect chain discontinuity
-        // (ChainBroken) before reaching the body-derived hash check
-        // (HashMismatch).
         wal.records[1].prev_chain_hash[0] ^= 1;
-        let result = wal.verify_chain(world());
         assert!(matches!(
-            result,
+            wal.verify_chain(world()),
             Err(WalError::ChainBroken { at_record: 1 })
         ));
     }
@@ -803,73 +983,91 @@ mod tests {
     fn different_world_id_produces_different_chain() {
         let mut w1 = WalWriter::new([1u8; 32], manifest());
         let mut w2 = WalWriter::new([2u8; 32], manifest());
-        for w in [&mut w1, &mut w2] {
-            w.append(
-                Tick(0),
-                InstanceId::new(1).unwrap(),
-                Principal::System,
-                None,
-                TypeCode(100),
-                vec![],
-                0,
-                StepStage::default(),
-                AuthDecisionAnnotation::AllAuthorized,
-            )
-            .unwrap();
-        }
-        // Domain-separation: different world_id → different keyed-hash output.
+        append_one(&mut w1);
+        append_one(&mut w2);
         assert_ne!(w1.chain_tip(), w2.chain_tip());
     }
 
     #[test]
     fn verify_chain_against_wrong_world_id_fails() {
         let mut w = WalWriter::new(world(), manifest());
-        w.append(
-            Tick(0),
-            InstanceId::new(1).unwrap(),
-            Principal::System,
-            None,
-            TypeCode(100),
-            vec![],
-            0,
-            StepStage::default(),
-            AuthDecisionAnnotation::AllAuthorized,
-        )
-        .unwrap();
+        append_one(&mut w);
         let wal = Wal::from_writer(w);
-        let result = wal.verify_chain([99u8; 32]);
-        assert!(matches!(result, Err(WalError::HashMismatch { .. })));
+        assert!(matches!(
+            wal.verify_chain([99u8; 32]),
+            Err(WalError::HashMismatch { .. })
+        ));
     }
 
     #[test]
-    fn auth_decision_annotation_round_trips() {
+    fn step_verdict_round_trips() {
+        // Replaces the old AuthDecisionAnnotation round-trip: a Step verdict
+        // (here BudgetPartial) survives serialize → deserialize verbatim.
         let mut w = WalWriter::new(world(), manifest());
-        w.append(
-            Tick(0),
+        w.append_step(
             InstanceId::new(1).unwrap(),
-            Principal::External(ExternalId(7)),
-            None,
-            TypeCode(101),
-            vec![],
-            0,
-            StepStage::default(),
-            AuthDecisionAnnotation::SomeDenied,
+            sid(1),
+            Tick(0),
+            0xFF,
+            StepVerdict::BudgetPartial { denied: 3 },
+            [4u8; 32],
         )
         .unwrap();
         let wal = Wal::from_writer(w);
         let bytes = wal.serialize().unwrap();
         let back = Wal::deserialize(&bytes).unwrap();
-        assert_eq!(
-            back.records[0].auth_decision,
-            AuthDecisionAnnotation::SomeDenied
-        );
+        match &back.records[0].content {
+            WalRecordContent::Step { verdict, .. } => {
+                assert_eq!(*verdict, StepVerdict::BudgetPartial { denied: 3 });
+            }
+            WalRecordContent::Submit { .. } => panic!("expected Step"),
+        }
+    }
+
+    #[test]
+    fn submit_record_round_trips_inputs() {
+        let actor = Some(EntityId::new(42).unwrap());
+        let mut w = WalWriter::new(world(), manifest());
+        w.append_submit(
+            InstanceId::new(9).unwrap(),
+            Principal::External(ExternalId(7)),
+            actor,
+            0xDEAD_BEEF,
+            Tick(5),
+            TypeCode(101),
+            vec![9, 8, 7],
+            sid(3),
+        )
+        .unwrap();
+        let wal = Wal::from_writer(w);
+        let bytes = wal.serialize().unwrap();
+        let back = Wal::deserialize(&bytes).unwrap();
+        match &back.records[0].content {
+            WalRecordContent::Submit {
+                instance,
+                actor: a,
+                caps_at_submit,
+                allocated_id,
+                action_bytes,
+                ..
+            } => {
+                assert_eq!(*instance, InstanceId::new(9).unwrap());
+                assert_eq!(*a, actor);
+                assert_eq!(*caps_at_submit, 0xDEAD_BEEF);
+                assert_eq!(*allocated_id, sid(3));
+                assert_eq!(action_bytes, &vec![9, 8, 7]);
+            }
+            WalRecordContent::Step { .. } => panic!("expected Submit"),
+        }
+        assert!(back.verify_chain(world()).is_ok());
     }
 
     #[test]
     fn header_carries_magic_and_versions() {
         let h = WalWriter::new(world(), manifest()).header().clone();
         assert_eq!(h.magic, *b"ARKHEWAL");
-        assert_eq!(h.kernel_semver, (0, 14, 0));
+        assert_eq!(h.kernel_semver, (0, 15, 0));
+        assert_eq!(h.abi_version, (0, 15));
         assert_eq!(h.world_id, world());
         assert_eq!(h.manifest_digest, manifest());
         assert!(h.type_registry_pins.is_empty());
@@ -878,21 +1076,6 @@ mod tests {
     }
 
     // ---- Ed25519 SignatureClass (Tier 2, A16) ----
-
-    fn append_one(w: &mut WalWriter) {
-        w.append(
-            Tick(0),
-            InstanceId::new(1).unwrap(),
-            Principal::System,
-            None,
-            TypeCode(100),
-            vec![1, 2, 3],
-            0,
-            sample_stage(),
-            AuthDecisionAnnotation::AllAuthorized,
-        )
-        .unwrap();
-    }
 
     #[test]
     fn signature_class_none_produces_no_signature() {
@@ -929,7 +1112,6 @@ mod tests {
             append_one(&mut w);
         }
         let wal = Wal::from_writer(w);
-        // Round-trip through serialize to confirm the on-disk shape verifies.
         let bytes = wal.serialize().unwrap();
         let back = Wal::deserialize(&bytes).unwrap();
         back.verify_chain(world()).expect("signed chain verifies");
@@ -937,20 +1119,16 @@ mod tests {
 
     #[test]
     fn tampered_signature_fails_verify() {
-        // Hash check would catch body tampering first; isolate the signature
-        // path by tampering ONLY the signature field.
         let sig_class = SignatureClass::new_ed25519_from_secret([13u8; 32]);
         let mut w = WalWriter::with_signature(world(), manifest(), sig_class);
         append_one(&mut w);
         append_one(&mut w);
         let mut wal = Wal::from_writer(w);
-        // Flip a byte inside record[1]'s signature.
         if let Some(sig) = wal.records[1].signature.as_mut() {
             sig[0] ^= 0xFF;
         }
-        let result = wal.verify_chain(world());
         assert!(matches!(
-            result,
+            wal.verify_chain(world()),
             Err(WalError::SignatureMismatch { at_record: 1 })
         ));
     }
@@ -961,11 +1139,9 @@ mod tests {
         let mut w = WalWriter::with_signature(world(), manifest(), sig_class);
         append_one(&mut w);
         let mut wal = Wal::from_writer(w);
-        // Header still pins a verifying_key, but the record claims no sig.
         wal.records[0].signature = None;
-        let result = wal.verify_chain(world());
         assert!(matches!(
-            result,
+            wal.verify_chain(world()),
             Err(WalError::MissingSignature { at_record: 0 })
         ));
     }
@@ -976,24 +1152,18 @@ mod tests {
         let mut w = WalWriter::with_signature(world(), manifest(), sig_class);
         append_one(&mut w);
         let mut wal = Wal::from_writer(w);
-        // Replace the pinned verifying key with a different one — the records'
-        // signatures stop verifying.
         let other = SignatureClass::new_ed25519_from_secret([23u8; 32])
             .verifying_key_bytes()
             .unwrap();
         wal.header.verifying_key = Some(other);
-        let result = wal.verify_chain(world());
         assert!(matches!(
-            result,
+            wal.verify_chain(world()),
             Err(WalError::SignatureMismatch { at_record: 0 })
         ));
     }
 
     #[test]
     fn signature_deterministic_across_runs() {
-        // RFC 8032 Ed25519 is deterministic — building two WALs with the
-        // same key and the same append sequence yields byte-identical
-        // record signatures.
         let mk = |secret: [u8; 32]| -> Vec<Vec<u8>> {
             let mut w = WalWriter::with_signature(
                 world(),
@@ -1016,28 +1186,20 @@ mod tests {
 
     #[test]
     fn domain_ctx_byte_identity_blake3() {
-        // Layer A item 1 (DOMAIN_CTX literal) byte-level formal anchor.
-        // The literal must remain frozen across kernel semver bumps —
-        // every WAL chain ever produced is keyed via
-        // `blake3::derive_key(DOMAIN_CTX, world_id)`; one byte change
+        // Layer A item 1 (DOMAIN_CTX literal) byte-level formal anchor. The
+        // literal must remain frozen for the v0.15 epoch — every WAL chain is
+        // keyed via `blake3::derive_key(DOMAIN_CTX, world_id)`; one byte change
         // rederives every chain key (A1/A14 byte-identity invariant).
         //
-        // Two complementary witnesses pin the literal:
-        //   1. Byte-identity vs the canonical literal (rewrite catch).
-        //   2. BLAKE3 hash regression vs a frozen hex (silent edit
-        //      catch — the byte-level formal anchor of E14 / A14).
-        //
-        // Update procedure: if the literal must change (semver-bump
-        // escalation), regenerate the hex via
+        // Update procedure (semver-bump escalation only): regenerate the hex via
         //   `printf '%s' "<new bytes>" | b3sum --no-names`
-        // and update both `EXPECTED` and `FROZEN_HEX` together.
-        // Layer A item 1 escalation review required.
-        const EXPECTED: &[u8] = b"arkhe-kernel v0.14 WAL chain domain separation context";
+        // and update EXPECTED and FROZEN_HEX together. Layer A item 1
+        // escalation review required.
+        const EXPECTED: &[u8] = b"arkhe-kernel v0.15 WAL chain domain separation context";
         assert_eq!(WalHeader::DOMAIN_CTX, EXPECTED);
         assert_eq!(WalHeader::DOMAIN_CTX.len(), 54);
 
-        // Frozen BLAKE3 hex of the canonical bytes (regression pin).
-        const FROZEN_HEX: &str = "4c20c496b74ba868f2669cfcc1a8b6f4c2e0f122bdba5e0337eaeebe599a1fda";
+        const FROZEN_HEX: &str = "3e1aa9478e76820fbdb31ca8fdf136df81d83635e2925584934cfa110f682129";
         let actual_hex = blake3::hash(WalHeader::DOMAIN_CTX).to_hex();
         assert_eq!(
             actual_hex.as_str(),
@@ -1048,39 +1210,37 @@ mod tests {
 
     #[test]
     fn wal_record_persists_actor_for_replay_determinism() {
-        // Regression (#1): the submit-time actor is canonical input (it
-        // feeds `ctx.actor`) and must survive into the record AND the
-        // chain hash so replay is bit-identical for modules that read it.
-        let mut w = WalWriter::new(world(), manifest());
+        // Regression (#1): the submit-time actor is canonical input (it feeds
+        // `ctx.actor`) and must survive into the record AND the chain hash.
         let actor = Some(EntityId::new(42).unwrap());
-        w.append(
-            Tick(0),
+        let mut w = WalWriter::new(world(), manifest());
+        w.append_submit(
             InstanceId::new(1).unwrap(),
             Principal::System,
             actor,
+            0,
+            Tick(0),
             TypeCode(100),
             vec![1, 2, 3],
-            0,
-            sample_stage(),
-            AuthDecisionAnnotation::AllAuthorized,
+            sid(1),
         )
         .unwrap();
         let wal = Wal::from_writer(w);
-        assert_eq!(wal.records[0].actor, actor);
+        match &wal.records[0].content {
+            WalRecordContent::Submit { actor: a, .. } => assert_eq!(*a, actor),
+            WalRecordContent::Step { .. } => panic!("expected Submit"),
+        }
         assert!(wal.verify_chain(world()).is_ok());
     }
 
     #[test]
     fn verify_chain_anchored_rejects_downgrade_and_substitution() {
-        // Regression (#1/#2 security): an anchored verify must reject a
-        // tier downgrade and a verifying-key substitution.
         let sig = SignatureClass::new_ed25519_from_secret([7u8; 32]);
         let vk = sig.verifying_key_bytes().unwrap();
         let mut w = WalWriter::with_signature(world(), manifest(), sig);
         append_one(&mut w);
         let wal = Wal::from_writer(w);
 
-        // Correct anchor (Ed25519 floor + matching key) → Ok.
         let good = TrustAnchor {
             min_tier: Some(SignatureTier::Ed25519),
             ed25519_verifying_key: Some(vk),
@@ -1088,7 +1248,6 @@ mod tests {
         };
         assert!(wal.verify_chain_anchored(world(), &good).is_ok());
 
-        // Downgrade: require Hybrid, WAL is only Ed25519 → reject.
         let downgrade = TrustAnchor {
             min_tier: Some(SignatureTier::Hybrid),
             ..Default::default()
@@ -1098,7 +1257,6 @@ mod tests {
             Err(WalError::TierDowngrade)
         ));
 
-        // Substitution: anchor expects a different key → reject.
         let wrong_key = TrustAnchor {
             min_tier: Some(SignatureTier::Ed25519),
             ed25519_verifying_key: Some([0xAB; 32]),
@@ -1110,47 +1268,93 @@ mod tests {
         ));
     }
 
-    // ---- PQC envelope wire format (Layer A item 7 post-extension) ----
+    // ---- frozen wire-format anchors (Layer A item 7 — CIL record shape) ----
 
     #[test]
-    fn wal_record_postcard_layout_byte_identity() {
-        // Pin the postcard wire-format byte sequence for an Ed25519-signed
-        // WalRecord via BLAKE3 frozen-hash regression. Any silent reorder
-        // of WalRecord fields (or insertion of new fields without updating
-        // this pin) breaks this assertion.
-        let sig_class = SignatureClass::new_ed25519_from_secret([7u8; 32]);
-        let mut w = WalWriter::with_signature(world(), manifest(), sig_class);
-        append_one(&mut w);
+    fn submit_record_postcard_layout_byte_identity() {
+        // Pin the postcard byte sequence of a Tier-1 Submit record. Any silent
+        // reorder / field add breaks this BLAKE3 regression.
+        let mut w = WalWriter::new([7u8; 32], [3u8; 32]);
+        w.append_submit(
+            InstanceId::new(99).unwrap(),
+            Principal::System,
+            Some(EntityId::new(5).unwrap()),
+            0xCAFE,
+            Tick(42),
+            TypeCode(0xBEEF),
+            vec![0xAA, 0xBB, 0xCC],
+            sid(7),
+        )
+        .unwrap();
         let wal = Wal::from_writer(w);
         let encoded = postcard::to_allocvec(&wal.records[0]).expect("postcard encode");
-        const FROZEN_HEX: &str = "170607201a4352833ebfe81a1546b4937cdafd587a3e266408b6c1a6bea16709";
-        let actual = blake3::hash(&encoded);
+        const FROZEN_HEX: &str = "43e10a825aa2b78cbbe59114fc546c31f64c8ffdf00dada54127bdc598967562";
         assert_eq!(
-            actual.to_hex().as_str(),
+            blake3::hash(&encoded).to_hex().as_str(),
             FROZEN_HEX,
-            "WalRecord postcard byte sequence regression",
+            "Submit record postcard byte sequence regression",
+        );
+    }
+
+    #[test]
+    fn step_record_postcard_layout_byte_identity() {
+        let mut w = WalWriter::new([7u8; 32], [3u8; 32]);
+        w.append_step(
+            InstanceId::new(99).unwrap(),
+            sid(13),
+            Tick(42),
+            0xC0FFEE,
+            StepVerdict::BudgetPartial { denied: 2 },
+            [0x5A; 32],
+        )
+        .unwrap();
+        let wal = Wal::from_writer(w);
+        let encoded = postcard::to_allocvec(&wal.records[0]).expect("postcard encode");
+        const FROZEN_HEX: &str = "44a440370648b160fa342075d77a1fd72629c1fde3467c0458c34c36d2ae4aa9";
+        assert_eq!(
+            blake3::hash(&encoded).to_hex().as_str(),
+            FROZEN_HEX,
+            "Step record postcard byte sequence regression",
+        );
+    }
+
+    #[test]
+    fn chain_hash_frozen_for_step_record() {
+        // Pins the resulting this_chain_hash for a fixed Step body under the
+        // v0.15 DOMAIN_CTX-derived chain key (DOMAIN_CTX + body field order).
+        let mut w = WalWriter::new([7u8; 32], [3u8; 32]);
+        w.append_step(
+            InstanceId::new(1).unwrap(),
+            sid(1),
+            Tick(0),
+            0xFF,
+            StepVerdict::Committed,
+            [9u8; 32],
+        )
+        .unwrap();
+        let wal = Wal::from_writer(w);
+        const FROZEN_HEX: &str = "0627f6472e44e5af82b9019698b80adc08fe02a5ffcf081b79a3ea824556df14";
+        assert_eq!(
+            blake3::Hash::from(wal.records[0].this_chain_hash)
+                .to_hex()
+                .as_str(),
+            FROZEN_HEX,
+            "chain hash regression — DOMAIN_CTX or Step body field order changed",
         );
     }
 
     #[test]
     fn wal_record_hybrid_layout_byte_identity() {
-        // Pin the postcard wire-format growth for a Hybrid record's PQC
-        // signature slot (envelope sized for ML-DSA 65 signature = 3309
-        // bytes). Verifies the wire format slot accommodates PQC signature
-        // sizes exceeding Ed25519's 64-byte fixed length.
+        // Pin the postcard wire-format growth for a record's PQC signature slot
+        // (ML-DSA 65 signature = 3309 bytes).
         let sig_class = SignatureClass::new_ed25519_from_secret([19u8; 32]);
         let mut w = WalWriter::with_signature(world(), manifest(), sig_class);
         append_one(&mut w);
         let mut wal = Wal::from_writer(w);
-        // Baseline: signature_pqc=None.
         let baseline_encoded = postcard::to_allocvec(&wal.records[0]).expect("baseline encode");
-        // Inject ML-DSA 65-sized placeholder signature (3309 bytes).
         wal.records[0].signature_pqc = Some(vec![0xAB; 3309]);
         let with_pqc_encoded = postcard::to_allocvec(&wal.records[0]).expect("with_pqc encode");
-        // Postcard Option<Vec<u8>>: None = 0x00 (1 byte).
-        // Some(vec[3309]) = 0x01 + varint(3309) + 3309 bytes.
-        // varint(3309) = 0xED 0x19 (2 bytes).
-        // Net growth: 1 + 2 + 3309 - 1 = 3311 bytes.
+        // None = 0x00 (1 byte); Some(vec[3309]) = 0x01 + varint(3309)=2 + 3309.
         assert_eq!(
             with_pqc_encoded.len() - baseline_encoded.len(),
             3311,
@@ -1160,24 +1364,15 @@ mod tests {
 
     #[test]
     fn wal_header_verifying_key_pqc_slot_pinned() {
-        // Pin the WalHeader PQC verifying-key envelope slot. None for
-        // non-Hybrid; Some(1952B) for Hybrid (ML-DSA 65 verifying key
-        // size). Verifies the wire format slot accommodates PQC public
-        // key sizes exceeding Ed25519's 32-byte fixed length.
         let h = WalWriter::new(world(), manifest()).header().clone();
-        // Tier 1: both verifying keys absent.
         assert!(h.verifying_key.is_none());
         assert!(h.verifying_key_pqc.is_none());
 
         let mut h_pqc = h.clone();
-        // Inject ML-DSA 65-sized placeholder verifying key (1952 bytes).
         h_pqc.verifying_key_pqc = Some(vec![0xCD; 1952]);
         let baseline = postcard::to_allocvec(&h).expect("encode baseline");
         let with_pqc = postcard::to_allocvec(&h_pqc).expect("encode with pqc key");
-        // Postcard Option<Vec<u8>>: None = 0x00 (1 byte).
-        // Some(vec[1952]) = 0x01 + varint(1952) + 1952 bytes.
-        // varint(1952) = 0xA0 0x0F (2 bytes).
-        // Net growth: 1 + 2 + 1952 - 1 = 1954 bytes.
+        // None = 1 byte; Some(vec[1952]) = 0x01 + varint(1952)=2 + 1952.
         assert_eq!(
             with_pqc.len() - baseline.len(),
             1954,
@@ -1185,87 +1380,17 @@ mod tests {
         );
     }
 
-    #[test]
-    fn chain_hash_unchanged_for_ed25519_records() {
-        // Layer A item 1 (DOMAIN_CTX) byte-identity preservation under
-        // the WalRecord wire format extension. WalRecordBody (10-field
-        // chain hash input) UNCHANGED — chain hash for the same body
-        // input is identical pre/post extension. Pins the resulting
-        // this_chain_hash via BLAKE3 frozen-hex regression.
-        let mut w = WalWriter::new([7u8; 32], [3u8; 32]);
-        w.append(
-            Tick(0),
-            InstanceId::new(1).unwrap(),
-            Principal::System,
-            None,
-            TypeCode(100),
-            vec![1, 2, 3],
-            0,
-            sample_stage(),
-            AuthDecisionAnnotation::AllAuthorized,
-        )
-        .unwrap();
-        let wal = Wal::from_writer(w);
-        const FROZEN_HEX: &str = "4bb26e665e904314600b52b0d3bef34ee476de1c155f701fa95c8f5438140319";
-        let actual_hex = blake3::Hash::from(wal.records[0].this_chain_hash).to_hex();
-        assert_eq!(
-            actual_hex.as_str(),
-            FROZEN_HEX,
-            "chain hash regression — DOMAIN_CTX or WalRecordBody field order changed",
-        );
-    }
-
-    #[test]
-    fn wal_record_postcard_field_order_baseline() {
-        // Layer A item 7 post-extension baseline pin. Pins the WalRecord
-        // postcard byte sequence for a Tier 1 (no signature) record with
-        // distinctive inputs. Any silent reorder or addition of fields
-        // breaks this BLAKE3 hash regression pin.
-        let mut w = WalWriter::new([7u8; 32], [3u8; 32]);
-        w.append(
-            Tick(42),
-            InstanceId::new(99).unwrap(),
-            Principal::System,
-            None,
-            TypeCode(0xCAFE),
-            vec![0xAA, 0xBB, 0xCC],
-            0xFF,
-            sample_stage(),
-            AuthDecisionAnnotation::AllAuthorized,
-        )
-        .unwrap();
-        let wal = Wal::from_writer(w);
-        let encoded = postcard::to_allocvec(&wal.records[0]).expect("postcard encode");
-        const FROZEN_HEX: &str = "ca468fac6ac1c0742c3b48e6398290630015411da040cf22c0228012b7e71cfa";
-        let actual = blake3::hash(&encoded);
-        assert_eq!(
-            actual.to_hex().as_str(),
-            FROZEN_HEX,
-            "WalRecord postcard field order regression",
-        );
-    }
-
     // ---- PQC Hybrid (Ed25519 + ML-DSA 65) wal-side wiring ----
 
     #[test]
     fn hybrid_writer_emits_both_signatures() {
-        // Hybrid sig_class populates both signature (Ed25519 64 bytes)
-        // and signature_pqc (ML-DSA 65 3309 bytes) on every record.
-        // Header pins both verifying_key (Ed25519 32 bytes) and
-        // verifying_key_pqc (ML-DSA 65 1952 bytes).
         let sig_class = SignatureClass::new_hybrid_from_secrets([7u8; 32], [11u8; 32]);
         let mut w = WalWriter::with_signature(world(), manifest(), sig_class);
         for _ in 0..3 {
             append_one(&mut w);
         }
         let wal = Wal::from_writer(w);
-        assert_eq!(
-            wal.header
-                .verifying_key
-                .expect("Hybrid pins Ed25519 vk")
-                .len(),
-            32
-        );
+        assert_eq!(wal.header.verifying_key.expect("Hybrid pins Ed25519 vk").len(), 32);
         assert_eq!(
             wal.header
                 .verifying_key_pqc
@@ -1295,9 +1420,6 @@ mod tests {
 
     #[test]
     fn hybrid_verify_chain_and_mode_passes_with_both_valid() {
-        // AND-mode positive: both Ed25519 and ML-DSA 65 signatures
-        // valid → verify_chain succeeds. Round-trip through serialize
-        // confirms the on-disk shape verifies.
         let sig_class = SignatureClass::new_hybrid_from_secrets([13u8; 32], [17u8; 32]);
         let mut w = WalWriter::with_signature(world(), manifest(), sig_class);
         for _ in 0..3 {
@@ -1312,80 +1434,57 @@ mod tests {
 
     #[test]
     fn hybrid_verify_chain_rejects_missing_pqc() {
-        // Strict (write-side): Hybrid envelope (header pins PQC vk) +
-        // record without signature_pqc → MissingPqcSignature.
         let sig_class = SignatureClass::new_hybrid_from_secrets([19u8; 32], [23u8; 32]);
         let mut w = WalWriter::with_signature(world(), manifest(), sig_class);
         append_one(&mut w);
         let mut wal = Wal::from_writer(w);
-        // Header still pins PQC vk, but the record claims no PQC sig.
         wal.records[0].signature_pqc = None;
-        let result = wal.verify_chain(world());
         assert!(matches!(
-            result,
+            wal.verify_chain(world()),
             Err(WalError::MissingPqcSignature { at_record: 0 })
         ));
     }
 
     #[test]
     fn hybrid_verify_chain_rejects_corrupt_pqc_signature() {
-        // Hybrid with valid Ed25519 + corrupt PQC signature →
-        // verify_hybrid Ed25519 phase passes, PQC phase fails →
-        // PqcSignatureMismatch.
         let sig_class = SignatureClass::new_hybrid_from_secrets([29u8; 32], [31u8; 32]);
         let mut w = WalWriter::with_signature(world(), manifest(), sig_class);
         append_one(&mut w);
         append_one(&mut w);
         let mut wal = Wal::from_writer(w);
-        // Flip a byte inside record[1]'s PQC signature.
         if let Some(sig_pqc) = wal.records[1].signature_pqc.as_mut() {
             sig_pqc[0] ^= 0xFF;
         }
-        let result = wal.verify_chain(world());
         assert!(matches!(
-            result,
+            wal.verify_chain(world()),
             Err(WalError::PqcSignatureMismatch { at_record: 1 })
         ));
     }
 
     #[test]
     fn hybrid_verify_chain_rejects_corrupt_ed25519_when_pqc_valid() {
-        // AND-mode short-circuit: corrupt Ed25519 signature with valid
-        // PQC signature → verify_hybrid Ed25519 phase fails first →
-        // PqcSignatureMismatch (uniform AND-mode failure error — any
-        // Hybrid signature failure maps to PqcSignatureMismatch at the
-        // WalError surface).
         let sig_class = SignatureClass::new_hybrid_from_secrets([37u8; 32], [41u8; 32]);
         let mut w = WalWriter::with_signature(world(), manifest(), sig_class);
         append_one(&mut w);
         append_one(&mut w);
         let mut wal = Wal::from_writer(w);
-        // Flip a byte inside record[0]'s Ed25519 signature; PQC stays valid.
         if let Some(sig) = wal.records[0].signature.as_mut() {
             sig[0] ^= 0xFF;
         }
-        let result = wal.verify_chain(world());
         assert!(matches!(
-            result,
+            wal.verify_chain(world()),
             Err(WalError::PqcSignatureMismatch { at_record: 0 })
         ));
     }
 
     #[test]
     fn ed25519_only_wal_replays_under_hybrid_kernel() {
-        // Backward-compat (read-side): Ed25519-only WAL bytes
-        // (verifying_key_pqc=None, signature_pqc=None per record)
-        // replay under a PQC-Hybrid-capable kernel via the
-        // (Some, None) → VerifierClass::Ed25519 envelope-derived
-        // dispatch arm. Strict mode applies write-side only.
         let sig_class = SignatureClass::new_ed25519_from_secret([43u8; 32]);
         let mut w = WalWriter::with_signature(world(), manifest(), sig_class);
         for _ in 0..3 {
             append_one(&mut w);
         }
         let wal = Wal::from_writer(w);
-        // Ed25519-only envelope: Ed25519 vk pinned, no PQC vk; records
-        // have signature but no signature_pqc.
         assert!(wal.header.verifying_key.is_some());
         assert!(wal.header.verifying_key_pqc.is_none());
         for rec in &wal.records {
@@ -1400,19 +1499,13 @@ mod tests {
 
     #[test]
     fn pqc_without_ed25519_envelope_rejected() {
-        // Envelope-level invariant: verifying_key=None +
-        // verifying_key_pqc=Some → invalid envelope. Ed25519 is the
-        // chain-anchor companion; PQC-only envelope is rejected.
-        // VerifierClass::from_header_bytes returns
-        // VerifierInitError::PqcWithoutEd25519 → wal.rs caller maps to
-        // WalError::PqcWithoutEd25519.
         let sig_class = SignatureClass::new_hybrid_from_secrets([47u8; 32], [53u8; 32]);
         let w = WalWriter::with_signature(world(), manifest(), sig_class);
         let mut wal = Wal::from_writer(w);
-        // Strip the Ed25519 verifying-key while leaving PQC vk in place
-        // → (None, Some) invalid envelope.
         wal.header.verifying_key = None;
-        let result = wal.verify_chain(world());
-        assert!(matches!(result, Err(WalError::PqcWithoutEd25519)));
+        assert!(matches!(
+            wal.verify_chain(world()),
+            Err(WalError::PqcWithoutEd25519)
+        ));
     }
 }

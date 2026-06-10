@@ -1,6 +1,6 @@
 [package]
 name = "dice"
-version = "0.14.2"
+version = "0.15.0"
 edition = "2021"
 rust-version.workspace = true
 description = "L1 deterministic-integrity example — WAL replay yields a bit-identical chain tip (A1 D1-Total proof)."
@@ -11,7 +11,7 @@ authors = ["Arkhe Contributors"]
 publish = false
 
 [dependencies]
-arkhe-kernel = { path = "../../arkhe-kernel", version = "0.14" }
+arkhe-kernel = { path = "../../arkhe-kernel", version = "0.15" }
 serde    = { workspace = true }
 postcard = { workspace = true }
 bytes    = { workspace = true }

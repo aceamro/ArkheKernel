@@ -195,6 +195,7 @@ fn roll_n(kernel: &mut Kernel, inst: InstanceId, seed: [u8; 32], n: u64, target_
                 inst,
                 Principal::System,
                 None,
+                CapabilityMask::SYSTEM,
                 at,
                 RollAction::TYPE_CODE,
                 bytes,
@@ -261,15 +262,20 @@ fn main() {
     let _inst2 = k2.create_instance(config); // caller pre-creates instance; snapshot integration will fold this
 
     let report = replay_into(&mut k2, &wal).expect("replay ok");
-    let replayed_tip = k2.wal_chain_tip().expect("wal attached");
+    // Under the Canonical Input Log, replay re-derives the chain through its
+    // own header-rebuilt writer and reports the MEASURED tip — it does not
+    // write back into k2's attached WAL.
+    let replayed_tip = report.final_chain_tip;
+    let records_replayed = report.submits_replayed + report.steps_replayed;
     let replayed_outcomes = replay_log.lock().unwrap().outcomes.clone();
 
     for o in &replayed_outcomes {
         println!("{}", fmt_outcome(o));
     }
     println!(
-        "  records_replayed={} chain_tip=0x{}…",
-        report.records_replayed,
+        "  submits={} steps={} chain_tip=0x{}…",
+        report.submits_replayed,
+        report.steps_replayed,
         fmt_chain_tip(&replayed_tip),
     );
 
@@ -277,7 +283,7 @@ fn main() {
     println!("\n────────────────────────────────────────────────────");
     let chain_match = replayed_tip == original_tip;
     let outcome_match = replayed_outcomes == original_outcomes;
-    let count_match = report.records_replayed as usize == original_records;
+    let count_match = records_replayed as usize == original_records;
 
     println!(
         "  chain_tip_match    : {}",
@@ -374,10 +380,13 @@ mod tests {
         let _ = k2.create_instance(cfg);
 
         let report = replay_into(&mut k2, &wal).unwrap();
-        let replayed_tip = k2.wal_chain_tip().unwrap();
+        let replayed_tip = report.final_chain_tip;
         let replayed = replay_log.lock().unwrap().outcomes.clone();
 
-        assert_eq!(report.records_replayed as usize, original_records);
+        assert_eq!(
+            (report.submits_replayed + report.steps_replayed) as usize,
+            original_records
+        );
         assert_eq!(replayed_tip, original_tip);
         assert_eq!(replayed, original);
     }

@@ -59,7 +59,13 @@ pub enum Op {
         /// Canonical-postcard bytes of the event payload.
         event_bytes: Bytes,
     },
-    /// Enqueue another action for a future tick.
+    /// Enqueue another action for a future tick. The scheduled action
+    /// inherits the *scheduling* action's principal (captured at dispatch)
+    /// and a `caps_ceiling` equal to the parent's effective capabilities —
+    /// privilege can only narrow across a schedule, never widen, so a domain
+    /// action cannot mint a more-privileged future action (no time-shifted
+    /// escalation). Kernel-internal System-origin scheduling goes through a
+    /// kernel API, not this domain Op.
     ScheduleAction {
         /// Tick at which the scheduled action becomes due.
         at: Tick,
@@ -69,8 +75,6 @@ pub enum Op {
         action_type_code: TypeCode,
         /// Canonical-postcard bytes of the scheduled action.
         action_bytes: Bytes,
-        /// Principal under which the scheduled action will be authorized.
-        action_principal: Principal,
     },
     /// Cross-instance signal. Routed by the kernel to the target
     /// instance's IPC queue post-commit.
@@ -122,7 +126,6 @@ mod tests {
             actor: None,
             action_type_code: TypeCode(3),
             action_bytes: Bytes::new(),
-            action_principal: Principal::System,
         }
         .clone();
         let _ = Op::SendSignal {

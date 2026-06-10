@@ -101,6 +101,16 @@ pub enum KernelEvent {
         /// Canonical bytes of the event payload.
         bytes: Bytes,
     },
+    /// A cross-instance `SendSignal` was routed into the target instance's
+    /// per-route inbox (the delivery counterpart of [`SignalDropped`]).
+    SignalDelivered {
+        /// Sending instance.
+        from: InstanceId,
+        /// Target instance whose inbox received the signal.
+        target: InstanceId,
+        /// Route discriminant the signal was enqueued under.
+        route: RouteId,
+    },
 }
 
 /// Why a `SendSignal` op was dropped before delivery.
@@ -168,8 +178,10 @@ bitflags! {
         const OBSERVERS_FLUSHED     = 1 << 8;
         /// Match [`KernelEvent::DomainEventEmitted`].
         const DOMAIN_EVENT_EMITTED  = 1 << 9;
+        /// Match [`KernelEvent::SignalDelivered`].
+        const SIGNAL_DELIVERED      = 1 << 10;
         /// Match every variant — equivalent to `Default`.
-        const ALL                   = 0x3FF;
+        const ALL                   = 0x7FF;
     }
 }
 
@@ -193,6 +205,7 @@ impl EventMask {
             KernelEvent::ActionDeferredToNextTick { .. } => self.contains(Self::ACTION_DEFERRED),
             KernelEvent::ObserversFlushed { .. } => self.contains(Self::OBSERVERS_FLUSHED),
             KernelEvent::DomainEventEmitted { .. } => self.contains(Self::DOMAIN_EVENT_EMITTED),
+            KernelEvent::SignalDelivered { .. } => self.contains(Self::SIGNAL_DELIVERED),
         }
     }
 }

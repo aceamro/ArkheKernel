@@ -7,15 +7,71 @@ a distinct chain epoch that does not replay under another. Patch releases
 (0.N.x) carry wire-format-neutral maintenance — dependency bumps, docs —
 and hold the epoch. Version 1.0 is intentionally never reached.
 
-## [0.14.2] — correctness hardening + step-loop optimization (wire-format-neutral)
+## [0.15.0] — Canonical Input Log epoch (wire-format-breaking)
 
-Patch release. The persisted wire format and chain epoch are unchanged:
-`WalHeader::CURRENT_KERNEL_SEMVER` `(0,14,0)`, `ABI_VERSION` `(0,14)`, and
-the `DOMAIN_CTX` `v0.14` chain-separation literal all hold. No
-`WalRecordBody`, header, or signature layout changed, so every 0.14-epoch
-WAL replays bit-identically under 0.14.2. The fixes below alter behavior
-only for inputs that were already incorrect (budget-bypassing Op sequences,
-component writes to a nonexistent entity); honest histories are unaffected.
+Epoch release. This is a new chain epoch: `WalHeader::CURRENT_KERNEL_SEMVER`
+`(0,15,0)`, `ABI_VERSION` `(0,15)`, and the `DOMAIN_CTX` `v0.15` chain-
+separation literal advance together, so a 0.14-epoch WAL does not replay
+under 0.15 (pre-public, forward-only). The release also absorbs the wire-
+format-neutral correctness, security, and performance work previously staged
+as 0.14.2 (never published) — see the `Fixed` / `Security` sections below.
+
+### Changed — WAL is a Canonical Input Log (CIL)
+
+- **The WAL records only non-reproducible facts.** One `Submit` record per
+  externally admitted action (instance, principal, actor, capability ceiling,
+  tick, type code, bytes, allocated id) and one `Step` record per pop (popped
+  id, tick, operator session ceiling, verdict, full post-state BLAKE3 digest).
+  Every *deterministic* effect — child `Op::ScheduleAction` schedules, cross-
+  instance signal routing, in-flight refcounts, internal id allocation,
+  scheduler tiebreak ordering — is left unlogged and re-derived on replay by
+  re-executing `compute()`. Double-execution, id drift, denied-divergence,
+  signal half-commit, and System-bypass become structurally unrepresentable
+  rather than test-guarded.
+- **`WalRecordBody` is restructured** to a kind-discriminated `Submit`/`Step`
+  shape. The staged-effect body and `AuthDecisionAnnotation` are removed;
+  `StepVerdict { Committed | AuthDenied | BudgetPartial { denied } | Skipped
+  { reason } }` and the post-state digest are added. The four frozen-hex wire
+  anchors are regenerated (Layer A items 1 + 7 escalation — see
+  `formal/axiom-test-cite.toml`).
+- **`replay_into` re-derives, it does not re-apply.** Replay drives the log
+  through the *same* per-instance step path the live kernel uses, asserts each
+  step's popped-id / verdict / post-state digest (fail-fast tripwires), and
+  re-measures the chain tip through a header-rebuilt writer — applying no
+  logged effect and copying no hash. `ReplayReport` splits `submits_replayed`
+  / `steps_replayed`; new `ReplayError` variants name each divergence class
+  (`PoppedIdDivergence`, `VerdictDivergence`, `StateDigestDivergence`,
+  `ChainTipDivergence`, `ManifestDigestMismatch`).
+- **The default `replay_into` validates `manifest_digest`** against the
+  replaying kernel's declared manifest (A14), closing a previously vacuous
+  gate without requiring a `TrustAnchor`.
+
+### Changed — unified capability model
+
+- **`Principal::System` is no longer an unconditional authorize bypass.** An
+  action's effective caps are `effective_caps(default_caps, principal,
+  ceiling)` intersected with the operator session ceiling, where System
+  resolves to the instance's `default_caps` (not "all"). An instance that
+  wants its System actions to `ScheduleAction` / `SendSignal` must grant those
+  caps in `default_caps`.
+- **`Op::ScheduleAction` drops its `action_principal` field.** A scheduled
+  child inherits the scheduling principal and runs under a ceiling equal to
+  the parent's effective caps — privilege can only narrow across a schedule,
+  so a capability cannot be time-shifted for later escalation.
+- **`Kernel::submit` gains a `caps` ceiling argument** and records a `Submit`.
+  The step-time `caps` argument is the operator session ceiling, recorded on
+  each `Step` so the verdict is re-derivable on replay.
+
+### Changed — cross-instance signal routing
+
+- **`Op::SendSignal` stages an outbound signal only.** The kernel router
+  delivers it into the target instance's per-route inbox after the sender's
+  step, crediting the in-flight refcount at delivery (a delivered signal
+  increments; a dropped one does not — never a speculative dangling
+  increment). Delivery emits `SignalDelivered` / `SignalDropped { TargetNotFound
+  | QueueFull }` and is bounded by `InstanceConfig::max_inbox_per_route`.
+  Cross-instance delivery has a documented one-step latency; routing is
+  unlogged and re-derived on replay.
 
 ### Fixed — `memory_budget_bytes` enforcement (A21)
 
@@ -55,26 +111,25 @@ component writes to a nonexistent entity); honest histories are unaffected.
   existing seed-scrub discipline. In-memory hygiene only — no serialized
   bytes, keys, or signatures change.
 
-### Performance — `step()` per-instance walk + per-step staging
+### Performance — per-step staging (scratch reuse retained)
 
-- `step()` destructures the kernel's fields once and iterates
-  `instances.iter_mut()` directly, removing the per-step `Vec<InstanceId>`
-  snapshot and the redundant `BTreeMap` re-lookups it existed to work
-  around (O(n·log n) → O(n) in instance count). `BTreeMap::iter_mut` yields
-  ascending `InstanceId` (A23), so WAL append order, state-mutation order,
-  and observer delivery order are unchanged.
 - The kernel reuses one `StepStage` scratch across actions (a private,
   non-serialized `step_scratch` field, `clear()`ed before each action)
   instead of allocating a fresh staging buffer every step. `apply_stage`
-  now borrows the stage `&mut` and drains the buckets it commits (retaining
+  borrows the stage `&mut` and drains the buckets it commits (retaining
   capacity); the rollback path simply skips apply. `clear()` is exhaustive
-  over all ten buckets (compile-checked via destructure), so the reused
-  scratch is byte-for-byte equivalent to `StepStage::default()` — the
-  frozen-hex chain-hash fixtures and the multi-record replay tests confirm
-  WAL bytes are unchanged.
-- Together these cut `kernel_step_with_100_pending_actions` ~16.9 µs → ~12.6 µs
-  (~26%). Both wins are allocation/lookup reductions, invisible under
-  Ed25519/Hybrid signing where the signing primitive (27 µs–924 µs) dominates.
+  over all buckets (compile-checked via destructure), so the reused scratch
+  is byte-for-byte equivalent to `StepStage::default()`.
+- The `iter_mut` per-instance walk introduced in the unpublished 0.14.2 work
+  is **reverted**: the CIL signal router must reach the cross-instance
+  instance map after each step (a sender routes into *other* instances'
+  inboxes), which a single `iter_mut` borrow held across the round cannot
+  provide. `step()` instead collects an ascending-`InstanceId` key snapshot
+  (A23 order preserved) and processes each instance under disjoint borrows,
+  running the router after each step. This trades the micro-optimization for
+  the routing correctness the epoch requires; `kernel_step_with_100_pending_actions`
+  measures ≈16.8 µs, dominated in any signed configuration by the signature
+  primitive (27 µs–924 µs).
 
 ## [0.14.1] — dependency maintenance (wire-format-neutral)
 

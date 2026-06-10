@@ -1,22 +1,26 @@
-//! `StepStage` — transactional COW staging for one `step()` (10 buckets).
+//! `StepStage` — transactional COW staging for one `step()` (9 buckets).
 //!
 //! Every commit-conditional write the kernel performs during a step is
 //! buffered here; on commit, `Instance::apply_stage` drains in canonical
 //! canonical order; on rollback, the stage is dropped without effect.
 //!
-//! Buckets (10):
+//! Buckets (9):
 //! 1. `state_ops` — entity/component mutations
 //! 2. `events` — KernelEvent emissions (kernel-level drain)
 //! 3. `schedule_deltas` — scheduler add/cancel
 //! 4. `pending_signals` — outbound IPC (kernel routes post-commit)
 //! 5. `id_counters` — monotonic ID counter advances
 //! 6. `ledger_delta` — ResourceLedger updates
-//! 7. `inflight_refs_delta` — drain-refcount per RouteId (signed delta)
-//! 8. `wall_remainder_delta` — sub-tick time accumulator advance
-//! 9. `local_tick_delta` — logical tick advance
-//! 10. `observer_eviction_pending` — observers slated for eviction
+//! 7. `wall_remainder_delta` — sub-tick time accumulator advance
+//! 8. `local_tick_delta` — logical tick advance
+//! 9. `observer_eviction_pending` — observers slated for eviction
+//!
+//! In-flight signal refcounts are NOT staged: the only refcount writers are
+//! the cross-instance signal router (delivery-side increment — it spans
+//! instances and so cannot route through a single instance's stage) and
+//! `force_unload` (drain), both mutating `Instance::inflight_refs` directly.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -35,7 +39,6 @@ pub(crate) struct StepStage {
     pub pending_signals: Vec<PendingSignal>,
     pub id_counters: IdCountersDelta,
     pub ledger_delta: ResourceLedgerDelta,
-    pub inflight_refs_delta: BTreeMap<RouteId, i32>,
     pub wall_remainder_delta: u128,
     pub local_tick_delta: u64,
     pub observer_eviction_pending: Vec<ObserverHandle>,
@@ -46,7 +49,7 @@ impl StepStage {
     /// capacity so the kernel can reuse one `StepStage` as a per-step scratch
     /// across actions without reallocating the staging buffers. After
     /// `clear()` the stage is behaviourally identical to
-    /// `StepStage::default()` (all ten buckets empty / zero), which
+    /// `StepStage::default()` (all nine buckets empty / zero), which
     /// `clear_resets_all_buckets` pins. The `let Self { .. }` destructure is
     /// exhaustive on purpose: a newly added bucket fails to compile here until
     /// it is cleared too, so the scratch can never silently leak state across
@@ -59,7 +62,6 @@ impl StepStage {
             pending_signals,
             id_counters,
             ledger_delta,
-            inflight_refs_delta,
             wall_remainder_delta,
             local_tick_delta,
             observer_eviction_pending,
@@ -70,7 +72,6 @@ impl StepStage {
         pending_signals.clear();
         *id_counters = IdCountersDelta::default();
         ledger_delta.ops.clear();
-        inflight_refs_delta.clear();
         *wall_remainder_delta = 0;
         *local_tick_delta = 0;
         observer_eviction_pending.clear();
@@ -187,7 +188,7 @@ pub(crate) fn projected_component_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::abi::Tick;
+    use crate::abi::{CapabilityMask, Tick};
 
     #[test]
     fn step_stage_default_all_buckets_empty() {
@@ -200,7 +201,6 @@ mod tests {
         assert_eq!(s.id_counters.next_scheduled_advance, 0);
         assert_eq!(s.id_counters.next_source_seq_advance, 0);
         assert!(s.ledger_delta.ops.is_empty());
-        assert!(s.inflight_refs_delta.is_empty());
         assert_eq!(s.wall_remainder_delta, 0);
         assert_eq!(s.local_tick_delta, 0);
         assert!(s.observer_eviction_pending.is_empty());
@@ -231,7 +231,6 @@ mod tests {
         s.id_counters.next_scheduled_advance = 9;
         s.id_counters.next_source_seq_advance = 9;
         s.ledger_delta.ops.push(LedgerOp::AddEntity(id));
-        s.inflight_refs_delta.insert(RouteId(1), 5);
         s.wall_remainder_delta = 12345;
         s.local_tick_delta = 7;
 
@@ -245,7 +244,6 @@ mod tests {
         assert_eq!(s.id_counters.next_scheduled_advance, 0);
         assert_eq!(s.id_counters.next_source_seq_advance, 0);
         assert!(s.ledger_delta.ops.is_empty());
-        assert!(s.inflight_refs_delta.is_empty());
         assert_eq!(s.wall_remainder_delta, 0);
         assert_eq!(s.local_tick_delta, 0);
         assert!(s.observer_eviction_pending.is_empty());
@@ -284,6 +282,7 @@ mod tests {
             principal: Principal::System,
             action_type_code: TypeCode(0),
             action_bytes: vec![],
+            caps_ceiling: CapabilityMask::all(),
         };
         let _ = ScheduledEntryDelta::Add(entry).clone();
         let _ = ScheduledEntryDelta::Remove(ScheduledActionId::new(1).unwrap()).clone();

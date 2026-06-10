@@ -117,6 +117,7 @@ mod tests {
             inst,
             Principal::System,
             None,
+            CapabilityMask::SYSTEM,
             Tick(0),
             SpawnManyAction::TYPE_CODE,
             bytes,

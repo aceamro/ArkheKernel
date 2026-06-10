@@ -24,5 +24,5 @@ pub use scope::InstanceScope;
 pub use traits::{Action, ActionCompute, ActionDeriv, Component, DeserializeError, Event};
 
 pub use instance::EntityMeta;
-pub(crate) use instance::Instance;
+pub(crate) use instance::{InboundSignal, Instance};
 pub(crate) use scheduler::{ScheduledActionId, ScheduledEntry};

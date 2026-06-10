@@ -1,6 +1,6 @@
 //! L0 runtime stratum.
 //!
-//! Kernel-level event types, transactional `StepStage` (10 buckets),
+//! Kernel-level event types, transactional `StepStage` (9 buckets),
 //! the Kernel orchestrator, dispatcher, action registry, and the
 //! panic-resilient observer chain. Depends on `abi` and
 //! `state`.

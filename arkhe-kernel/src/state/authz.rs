@@ -103,21 +103,48 @@ impl core::fmt::Display for DenyReason {
 
 impl std::error::Error for DenyReason {}
 
-/// Authorize an unverified Effect against a capability mask.
+/// Resolve the effective capabilities an action runs under, from the
+/// instance's configured `default_caps`, the action's `principal`, and the
+/// `ceiling` it inherited (an external submission's granted caps, or a
+/// scheduling parent's effective caps). Authority is the *intersection* of
+/// config and ceiling on every authenticated path (min-of-bounds, like the
+/// A10 quota reduction): `Principal::System` is bounded by `default_caps &
+/// ceiling` exactly as `External` is — it is NOT an unconditional bypass and
+/// NOT exempt from the ceiling. System is privileged only insofar as
+/// `default_caps` grants AND the ceiling permits, so a submission or a
+/// scheduled child of ANY principal can never exceed either bound and
+/// privilege only narrows across a schedule (a scheduled child's ceiling is
+/// the parent's effective caps, captured at schedule time, so a later-raised
+/// operator session ceiling cannot re-widen the child — no time-shift
+/// escalation). `Unauthenticated` is always empty.
+pub(crate) fn effective_caps(
+    default_caps: CapabilityMask,
+    principal: &Principal,
+    ceiling: CapabilityMask,
+) -> CapabilityMask {
+    match principal {
+        Principal::System | Principal::External(_) => default_caps & ceiling,
+        Principal::Unauthenticated => CapabilityMask::empty(),
+    }
+}
+
+/// Authorize an unverified Effect against the already-resolved
+/// `effective_caps` (see [`effective_caps`]) for its (instance, principal,
+/// ceiling) — intersected by the caller with any operator session ceiling.
 ///
 /// Policy (per-entity ownership refinement deferred):
-/// - `Principal::System`            — all Ops permitted.
 /// - `Principal::Unauthenticated`   — denied (no read/write paths yet).
-/// - `Principal::External(_)`       — `SYSTEM` cap grants all; otherwise
-///   per-Op cap match (`match_op_cap`).
+/// - `Principal::System` / `External(_)` — gated identically by
+///   `effective_caps`: the `SYSTEM` bit grants all Ops, otherwise per-Op
+///   cap match (`match_op_cap`). System holds authority only when the
+///   instance's `default_caps` grant it — there is no blanket bypass.
 pub(crate) fn authorize<'i>(
     caps: CapabilityMask,
     effect: Effect<'i, Unverified>,
 ) -> Result<Effect<'i, Authorized>, DenyReason> {
     match &effect.principal {
-        Principal::System => { /* pass — kernel-internal origin */ }
         Principal::Unauthenticated => return Err(DenyReason::CapabilityDenied),
-        Principal::External(_) => {
+        Principal::System | Principal::External(_) => {
             if !caps.contains(CapabilityMask::SYSTEM) && !match_op_cap(&effect.op, caps) {
                 return Err(DenyReason::CapabilityDenied);
             }
@@ -222,7 +249,6 @@ mod tests {
             actor: None,
             action_type_code: TypeCode(0),
             action_bytes: Bytes::new(),
-            action_principal: Principal::System,
         }
     }
     fn signal_op() -> Op {
@@ -234,12 +260,68 @@ mod tests {
     }
 
     #[test]
-    fn system_principal_authorized_for_all_ops() {
-        for op in [spawn_op(), schedule_op(), signal_op()] {
-            let e = Effect::new(inst(), Principal::System, op);
-            let result = authorize(CapabilityMask::default(), e);
-            assert!(result.is_ok(), "System principal must always pass");
+    fn system_principal_gated_by_effective_caps_not_blanket_bypass() {
+        // System is NOT an unconditional bypass: under empty effective caps a
+        // SYSTEM-gated op (schedule/signal) is denied; under SYSTEM caps all
+        // ops pass. (Basic state ops remain open to any non-empty principal.)
+        for op in [schedule_op(), signal_op()] {
+            let denied = authorize(CapabilityMask::empty(), Effect::new(inst(), Principal::System, op));
+            assert_eq!(
+                denied.unwrap_err(),
+                DenyReason::CapabilityDenied,
+                "System with empty caps must NOT pass a SYSTEM-gated op"
+            );
         }
+        for op in [spawn_op(), schedule_op(), signal_op()] {
+            let ok = authorize(CapabilityMask::SYSTEM, Effect::new(inst(), Principal::System, op));
+            assert!(ok.is_ok(), "System with SYSTEM caps passes every op");
+        }
+    }
+
+    #[test]
+    fn effective_caps_intersects_config_and_ceiling_for_authenticated_principals() {
+        // Effective caps = default_caps ∩ ceiling (min-of-bounds) for BOTH
+        // System and External — System is not exempt from the ceiling.
+        let full = CapabilityMask::all();
+        let none = CapabilityMask::empty();
+        let ext = Principal::External(ExternalId(7));
+        let sys = Principal::System;
+        assert_eq!(effective_caps(full, &ext, none), none, "ceiling caps to none");
+        assert_eq!(effective_caps(none, &ext, full), none, "config caps to none");
+        assert_eq!(effective_caps(full, &ext, full), full);
+        // System obeys the ceiling exactly like External (monotone narrowing).
+        assert_eq!(
+            effective_caps(full, &sys, none),
+            none,
+            "System is bounded by the ceiling — a low ceiling narrows it (no bypass)"
+        );
+        assert_eq!(effective_caps(none, &sys, full), none, "System bounded by config");
+        assert_eq!(effective_caps(full, &sys, full), full);
+        // Unauthenticated = empty always.
+        assert_eq!(
+            effective_caps(full, &Principal::Unauthenticated, full),
+            none
+        );
+    }
+
+    #[test]
+    fn scheduled_system_child_cannot_rewiden_past_caps_ceiling() {
+        // The core no-time-shift-escalation invariant for System children: a
+        // child whose caps_ceiling (= the parent's narrowed effective caps) is
+        // a strict subset of default_caps stays bounded by that ceiling even if
+        // default_caps (or a later session) would permit more. Pre-fix this
+        // returned `default_caps`, silently re-widening the child.
+        let full = CapabilityMask::all();
+        let parent_effective = CapabilityMask::SYSTEM; // parent ran narrowed
+        let child = effective_caps(full, &Principal::System, parent_effective);
+        assert_eq!(
+            child, parent_effective,
+            "System child is locked to the parent's effective caps, never default_caps"
+        );
+        assert!(
+            child.bits() <= parent_effective.bits(),
+            "child authority is a subset of the scheduling parent's"
+        );
     }
 
     #[test]

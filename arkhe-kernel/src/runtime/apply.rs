@@ -12,7 +12,7 @@
 //! Application is panic-free (totality contract): every operation
 //! uses saturating arithmetic and `if let Some(...)` style guards.
 
-use super::stage::{LedgerOp, ScheduledEntryDelta, StagedStateDelta, StepStage};
+use super::stage::{LedgerOp, PendingSignal, ScheduledEntryDelta, StagedStateDelta, StepStage};
 use crate::state::Instance;
 
 /// Apply a `StepStage` to `instance` in canonical order:
@@ -20,9 +20,8 @@ use crate::state::Instance;
 /// 1. `id_counters`
 /// 2. `state_ops`
 /// 3. `ledger_delta`
-/// 4. `inflight_refs_delta`
-/// 5. `schedule_deltas`
-/// 6. `wall_remainder` and `local_tick`
+/// 4. `schedule_deltas`
+/// 5. `wall_remainder` and `local_tick`
 ///
 /// Kernel-level buckets `pending_signals` / `events` / `observer_eviction`
 /// are drained by Kernel post-commit (chunks 3b/c) — left untouched here.
@@ -30,9 +29,14 @@ use crate::state::Instance;
 /// `stage` is borrowed `&mut` (not consumed): the kernel owns one
 /// `StepStage` scratch and reuses it across actions, so this function drains
 /// the buckets it applies (retaining their capacity) and leaves the
-/// kernel-level buckets for the caller. The caller `clear()`s the scratch
-/// before the next action.
-pub(crate) fn apply_stage(instance: &mut Instance, stage: &mut StepStage) {
+/// kernel-level buckets (`events`, `observer_eviction_pending`) for the
+/// caller. The caller `clear()`s the scratch before the next action.
+///
+/// Returns the drained outbound `pending_signals` so the kernel router can
+/// resolve targets and deliver them into per-route inboxes (routing needs
+/// the cross-instance map, which lives on `Kernel`, not `Instance` — so it
+/// cannot happen here without violating the single-`iter_mut` borrow).
+pub(crate) fn apply_stage(instance: &mut Instance, stage: &mut StepStage) -> Vec<PendingSignal> {
     // 1. id_counters — monotonic; no preconditions.
     {
         let c = instance.id_counters_mut();
@@ -112,38 +116,26 @@ pub(crate) fn apply_stage(instance: &mut Instance, stage: &mut StepStage) {
         }
     }
 
-    // 4. inflight_refs_delta — i32 deltas applied to u32 table.
-    {
-        let refs = instance.inflight_refs_mut();
-        // `mem::take` drains the map (retaining nothing) while preserving the
-        // ascending-RouteId iteration order of a by-value walk.
-        for (route_id, delta) in std::mem::take(&mut stage.inflight_refs_delta) {
-            let entry = refs.entry(route_id).or_insert(0);
-            if delta >= 0 {
-                *entry = entry.saturating_add(delta as u32);
-            } else {
-                *entry = entry.saturating_sub(delta.unsigned_abs());
-            }
-            if *entry == 0 {
-                refs.remove(&route_id);
-            }
-        }
-    }
-
-    // 5. schedule_deltas — scheduler mutation. NOTE: the Add path passes
-    // entry data to `Scheduler::schedule` (which assigns a fresh ID); the
-    // staged `entry.id` is *not* preserved at this layer. Pre-assigned
-    // scheduling is reserved (deferred) for when the stage will carry
-    // the canonical ID up-front.
+    // 4. schedule_deltas — scheduler mutation. The Add path commits each
+    // staged entry under its OWN pre-allocated id (dispatch minted it
+    // deterministically from the instance's id counter), so the id is decided
+    // once and reproduced verbatim by re-execution on replay.
     {
         let scheduler = instance.scheduler_mut();
         for sd in stage.schedule_deltas.drain(..) {
             match sd {
                 ScheduledEntryDelta::Add(entry) => {
-                    let _ = scheduler.schedule(
+                    // Commit the staged entry under its OWN pre-allocated id
+                    // (dispatch minted it deterministically) — never re-mint a
+                    // fresh id here, so the id that dispatch decided is the id
+                    // the scheduler holds end-to-end (replay reproduces it by
+                    // re-execution).
+                    scheduler.schedule_with_id(
+                        entry.id,
                         entry.at,
                         entry.actor,
                         entry.principal,
+                        entry.caps_ceiling,
                         entry.action_type_code,
                         entry.action_bytes,
                     );
@@ -155,14 +147,15 @@ pub(crate) fn apply_stage(instance: &mut Instance, stage: &mut StepStage) {
         }
     }
 
-    // 6/7/9. pending_signals / events / observer_eviction_pending —
-    // kernel-level buckets; Kernel reads/drains these post-commit and then
-    // `clear()`s the whole scratch before the next action. Left untouched
-    // here (no longer owned, so nothing to drop).
-
     // 8. wall_remainder + local_tick advance.
     instance.advance_wall_remainder(stage.wall_remainder_delta);
     instance.advance_local_tick(stage.local_tick_delta);
+
+    // 6/7/9. events / observer_eviction_pending stay for the kernel to
+    // read post-commit (then `clear()`). pending_signals are DRAINED and
+    // returned for the kernel router (delivery + refcount + events happen
+    // there, where the cross-instance map is reachable).
+    stage.pending_signals.drain(..).collect()
 }
 
 #[cfg(test)]
@@ -170,7 +163,7 @@ mod tests {
     use super::*;
     use bytes::Bytes;
 
-    use crate::abi::{CapabilityMask, EntityId, InstanceId, Principal, RouteId, Tick, TypeCode};
+    use crate::abi::{CapabilityMask, EntityId, InstanceId, Principal, Tick, TypeCode};
     use crate::runtime::stage::{IdCountersDelta, LedgerOp, ScheduledEntryDelta, StagedStateDelta};
     use crate::state::{
         EntityMeta, Instance, InstanceConfig, QuotaReductionPolicy, ScheduledActionId,
@@ -188,6 +181,7 @@ mod tests {
             default_caps: CapabilityMask::default(),
             max_entities: 100,
             max_scheduled: 1000,
+            max_inbox_per_route: 16,
             memory_budget_bytes: 1 << 20,
             parent: None,
             quota_reduction: QuotaReductionPolicy::default(),
@@ -376,27 +370,6 @@ mod tests {
     }
 
     #[test]
-    fn apply_inflight_refs_positive_then_negative_to_zero() {
-        let mut inst = Instance::new(id(1), cfg());
-        let route = RouteId(42);
-
-        let mut up = StepStage {
-            inflight_refs_delta: [(route, 3)].into_iter().collect(),
-            ..Default::default()
-        };
-        apply_stage(&mut inst, &mut up);
-        assert_eq!(inst.inflight_refs_for(route), 3);
-
-        let mut down = StepStage {
-            inflight_refs_delta: [(route, -3)].into_iter().collect(),
-            ..Default::default()
-        };
-        apply_stage(&mut inst, &mut down);
-        assert_eq!(inst.inflight_refs_for(route), 0);
-        assert_eq!(inst.inflight_refs_len(), 0);
-    }
-
-    #[test]
     fn apply_wall_and_local_tick_advance() {
         let mut inst = Instance::new(id(1), cfg());
         let mut stage = StepStage {
@@ -420,6 +393,7 @@ mod tests {
                 principal: Principal::System,
                 action_type_code: TypeCode(0),
                 action_bytes: vec![1, 2, 3],
+                caps_ceiling: CapabilityMask::all(),
             })],
             ..Default::default()
         };

@@ -58,7 +58,7 @@
 //! let mut kernel = Kernel::new();
 //! kernel.register_action::<Hello>();
 //! let inst = kernel.create_instance(InstanceConfig::default());
-//! kernel.submit(inst, Principal::System, None, Tick(0), TypeCode(1), Vec::new()).unwrap();
+//! kernel.submit(inst, Principal::System, None, CapabilityMask::SYSTEM, Tick(0), TypeCode(1), Vec::new()).unwrap();
 //! let report = kernel.step(Tick(0), CapabilityMask::SYSTEM);
 //! assert_eq!(report.actions_executed, 1);
 //! assert_eq!(report.effects_applied, 1);

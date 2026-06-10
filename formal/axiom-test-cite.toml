@@ -14,7 +14,7 @@
 schema_version = 1
 mc_axiom_count = 12
 formal_method_anchors = "formal/tla-plus/{runtime_core,cr1,cr2,cr3,cr4,r4}.tla"
-cycle = "v0.14"
+cycle = "v0.15"
 
 # ============================================================
 # CR-N anchors — Cryptographic refinement primitive class siblings
@@ -82,6 +82,16 @@ chain_invalidation = "v0.13-epoch WALs NOT replayable under v0.14 (new chain epo
 verify_chain = "DOMAIN_CTX EXPECTED literal regen + domain_ctx_byte_identity_blake3 FROZEN_HEX regen + CURRENT_KERNEL_SEMVER (0,13,0)→(0,14,0) + ABI_VERSION (0,13)→(0,14) + ci/l0-baseline-hashes.txt regen + axiom-cite gate PASS + cargo test (235) + clippy --all-targets clean"
 spec_anchor = "user directive 2026-05-29 (verbatim consent)"
 
+[layer_a_items.item_1.escalation_event_3]
+date = "2026-06-10"
+commit_hash = "pending (uncommitted working tree)"
+consent = "user directive 2026-06-10 (verbatim): 0.14.2(미push)와 0.15.0을 0.15.0 epoch 하나로 통합 + '제대로/구조적 아름다움/땜빵 금지'. Confirms the wire-format-breaking epoch advance."
+rationale = "v0.15.0 epoch — Canonical Input Log (CIL) restructure of the WAL. The persisted wire format changes (Submit/Step records, effects re-derived on replay), so the chain epoch advances and the DOMAIN_CTX literal + version pins move in lockstep. Also carries the operator session ceiling onto the Step record (replay re-derives the verdict) and the unified capability model (System no longer blanket-bypasses)."
+literal_diff = "FROM b\"arkhe-kernel v0.14 WAL chain domain separation context\" TO b\"arkhe-kernel v0.15 WAL chain domain separation context\" (length 54 unchanged)"
+chain_invalidation = "v0.14-epoch WALs NOT replayable under v0.15 (new chain epoch). blake3::derive_key(DOMAIN_CTX, world_id) input bytes change → derived chain key change → all prior-epoch chain hash mismatch. Acceptable per user directive (pre-public, forward-only)."
+verify_chain = "DOMAIN_CTX EXPECTED literal regen + domain_ctx_byte_identity_blake3 FROZEN_HEX regen (3e1aa947…) + CURRENT_KERNEL_SEMVER (0,14,0)→(0,15,0) + ABI_VERSION (0,14)→(0,15) + ci/l0-baseline-hashes.txt regen + axiom-cite gate PASS + cargo test (268) + clippy --all-targets -D warnings clean + dice D1-Total replay PASS"
+spec_anchor = "user directive 2026-06-10 (verbatim consent); docs/design/v0.15-epoch-cil.md"
+
 [layer_a_items.item_2]
 name = "InvariantLifetime variance"
 formal_anchor = false
@@ -118,7 +128,7 @@ name = "WalRecord postcard field order"
 formal_anchor = true
 axioms = ["A1"]
 e_inheritance = ["E14"]
-cite_anchor = "CR-1 ChainHashFn (BLAKE3 keyed_hash over postcard-encoded WalRecord) + wal_record_postcard_field_order_baseline (arkhe-kernel/src/persist/wal.rs::tests)"
+cite_anchor = "CR-1 ChainHashFn (BLAKE3 keyed_hash over postcard-encoded WalRecord) + step_record_postcard_layout_byte_identity (arkhe-kernel/src/persist/wal.rs::tests)"
 
 [layer_a_items.item_7.escalation_event]
 date = "2026-05-02"
@@ -131,8 +141,8 @@ verify_chain = "byte-level wire format diff + cr1 + cr3 comment block update + a
 spec_anchor = "L0 chain-input invariance preserved across the PQC envelope addition (chain-input bytes unchanged, additive wire-format slots only)"
 
 [layer_a_items.item_7.dual_layer_protection]
-sub_a_invariant = "WalRecordBody (11-field chain hash input as of v0.14; was 10-field) — escalation pathway applied ONCE at v0.14 (actor field, see escalation_event_2). ChainHashFn upstream determinism. A1 + E14 anchored."
-sub_b_relaxed = "WalRecord wire format (12->13 fields at PQC introduction; +actor at v0.14) — RELAXED monotone append-only. Hybrid PQC signatures (signature_pqc=Some) and the actor field are append-only; rollback 0."
+sub_a_invariant = "WalRecordBody — kind-discriminated Submit/Step body as of v0.15 (was an 11-field effect body at v0.14). The chain-hash input is restructured wholesale by the CIL epoch (see escalation_event_3): the body now records inputs + verdict + post-state digest, never staged effects. ChainHashFn upstream determinism. A1 + E14 anchored."
+sub_b_relaxed = "WalRecord wire format — RELAXED monotone for the signature envelope (signature/signature_pqc append-only); the v0.15 record CONTENT is a kind-discriminated rewrite (Submit/Step), authorized under the epoch escalation rather than the append-only relaxation."
 
 [layer_a_items.item_7.escalation_event_2]
 date = "2026-05-29"
@@ -141,8 +151,18 @@ consent = "user directive 2026-05-29 (verbatim): 발견된 모든 문제·불일
 rationale = "Bug-hunt finding #1 (HIGH, A1 D1-Total): the submit-time actor (Option<EntityId> feeding ActionContext::actor in compute()) was dropped from the WAL record, so a module branching on ctx.actor diverged on replay (actor=None). Fix: persist actor in WalRecord AND WalRecordBody so it is covered by the chain hash."
 layout_change = "WalRecordBody chain-hash input 10 → 11 fields (actor inserted after principal); WalRecord gains the matching field. Applies the escalation pathway to the item_7 sub_a invariant (previously 'NEVER applied') — authorized under the v0.14 epoch."
 invariant_preserved = "A1 bit-identical replay now HOLDS for actor-reading modules (it did not before). v0.13-epoch WALs are a separate epoch regardless (see item_1.escalation_event_2)."
-verify_chain = "3 record-format frozen-hex regens (wal_record_postcard_layout_byte_identity + chain_hash_unchanged_for_ed25519_records + wal_record_postcard_field_order_baseline) + new wal_record_persists_actor_for_replay_determinism test + replay_records threads rec.actor + ci/l0-baseline-hashes.txt regen + cargo test (235) PASS + dice D1-Total replay PASS"
+verify_chain = "3 record-format frozen-hex regens (submit_record_postcard_layout_byte_identity + chain_hash_frozen_for_step_record + step_record_postcard_layout_byte_identity) + new wal_record_persists_actor_for_replay_determinism test + replay_records threads rec.actor + ci/l0-baseline-hashes.txt regen + cargo test (235) PASS + dice D1-Total replay PASS"
 spec_anchor = "user directive 2026-05-29 (verbatim consent); bug-hunt finding #1"
+
+[layer_a_items.item_7.escalation_event_3]
+date = "2026-06-10"
+commit_hash = "pending (uncommitted working tree)"
+consent = "user directive 2026-06-10 (verbatim): 0.15.0 epoch 하나로 통합 + 구조적 아름다움. Largest single Layer A surface change of the epoch (per docs/design/v0.15-epoch-cil.md ESCALATION #3)."
+rationale = "Canonical Input Log root model: the WAL records ONLY non-reproducible facts and re-derives every deterministic effect on replay. This makes double-execution, internal-id drift, denied-divergence, signal half-commit, and System-bypass STRUCTURALLY UNREPRESENTABLE rather than test-guarded."
+layout_change = "WalRecordBody restructured from the 11-field effect body (stage + caps_bits + auth_decision) to a kind-discriminated Submit/Step body. Submit{seq,instance,principal,actor,caps_at_submit,at,action_type_code,action_bytes,allocated_id}; Step{seq,instance,popped_id,now,session_caps,verdict,post_state_digest}. stage REMOVED; AuthDecisionAnnotation DELETED → StepVerdict{Committed,AuthDenied,BudgetPartial,Skipped}; actor RETAINED. The chain hash now covers inputs + verdict + post-state digest."
+invariant_preserved = "A1 bit-identical replay HOLDS and is now witnessed per-step by post_state_digest (the replay tripwire). Replay applies no logged effect and copies no tip: it re-executes compute(), asserts popped_id/verdict/digest, and re-measures the chain tip through a header-rebuilt writer. v0.14-epoch WALs are a separate epoch regardless (item_1.escalation_event_3)."
+verify_chain = "4 record-format frozen-hex regens (domain_ctx_byte_identity_blake3 + chain_hash_frozen_for_step_record + submit_record_postcard_layout_byte_identity + step_record_postcard_layout_byte_identity) + 13 new CIL determinism tests (replay_internal_scheduling_is_bit_identical headline) + replay.rs CIL driver (submit_with_id/process_instance_record + tripwires + measured tip) + ci/l0-baseline-hashes.txt regen + cargo test (268) PASS + clippy -D warnings clean + dice D1-Total replay PASS"
+spec_anchor = "user directive 2026-06-10 (verbatim consent); docs/design/v0.15-epoch-cil.md ESCALATION #3"
 
 # ============================================================
 # E1-E15 ↔ TLA+ INV ↔ kernel impl test cite
@@ -219,12 +239,17 @@ impl_tests = [
     "tick_advance_saturates_without_wrapping",
     "pop_due_at_exact_tick_pops",
     "pop_due_ordering_by_tick",
+    # CIL (v0.15): internal Op::ScheduleAction is re-derived on replay, never
+    # logged — the cascade re-submit is reproduced by re-execution, bit-identical.
+    "replay_internal_scheduling_is_bit_identical",
+    "next_seq_tiebreak_survives_replay",
 ]
 impl_paths = [
     "arkhe-kernel/src/abi/ids.rs",
     "arkhe-kernel/src/state/scheduler.rs",
+    "arkhe-kernel/src/persist/replay.rs",
 ]
-note = "kernel-side tick saturation + scheduler ordering witnesses anchor CascadeOp deterministic placement at the L0 layer"
+note = "kernel-side tick saturation + scheduler ordering witnesses anchor CascadeOp deterministic placement at the L0 layer; the CIL replay-determinism tests prove the cascade Op is re-derived (not double-executed) across replay"
 
 # ----- E12: RuntimeBootstrap chain-anchored + manifest drift rejected -----
 [E12]
@@ -235,14 +260,18 @@ tla_module = "formal/tla-plus/cr3_replay_determinism.tla"
 tla_invs = ["RuntimeBootstrapChainAnchored", "ManifestDriftReplayRejected"]
 impl_tests = [
     "header_carries_magic_and_versions",
-    "wal_attached_kernel_records_committed_step",
+    "wal_attached_kernel_records_submit_then_step",
     "wal_kernel_export_then_verify_chain",
+    # CIL (v0.15): the default replay_into validates the header manifest_digest
+    # against the replaying kernel's declared manifest (closes the vacuous-A14 hole).
+    "manifest_digest_validated_on_default_path",
 ]
 impl_paths = [
     "arkhe-kernel/src/persist/wal.rs",
     "arkhe-kernel/src/runtime/kernel.rs",
+    "arkhe-kernel/src/persist/replay.rs",
 ]
-note = "wal header carries manifest_digest at byte-pinned offset; kernel export+verify_chain exercises bootstrap commit path"
+note = "wal header carries manifest_digest at byte-pinned offset; kernel export+verify_chain exercises bootstrap commit path; the default replay path now rejects a manifest drift without a TrustAnchor"
 
 # ----- E13: SignatureClassPolicy chain-anchored + sticky-Hybrid -----
 [E13]
@@ -336,20 +365,20 @@ impl_tests = [
     "verify_chain_detects_broken_prev_link",
     "verify_chain_against_wrong_world_id_fails",
     "verify_chain_validates_signatures",
-    "tampered_record_breaks_verify_chain",
+    "tampered_step_body_breaks_verify_chain",
     "tampered_signature_fails_verify",
     "missing_signature_fails_verify_when_header_has_key",
     "wrong_key_fails_verify",
-    "single_append_produces_nonzero_chain_tip",
+    "single_step_append_produces_nonzero_chain_tip",
     "multi_record_chain_links_each_record",
     "different_world_id_produces_different_chain",
-    "chain_hash_unchanged_for_ed25519_records",
+    "chain_hash_frozen_for_step_record",
     "signature_deterministic_across_runs",
     # WAL byte-format pinning (Layer A item 7 — A1+E14 upstream)
-    "wal_record_postcard_layout_byte_identity",
+    "submit_record_postcard_layout_byte_identity",
     "wal_record_hybrid_layout_byte_identity",
     "wal_header_verifying_key_pqc_slot_pinned",
-    "wal_record_postcard_field_order_baseline",
+    "step_record_postcard_layout_byte_identity",
     # Layer A item 1 (DOMAIN_CTX byte identity — A1+A14 upstream of ChainHashDeterministic)
     "domain_ctx_byte_identity_blake3",
     # Layer A item 3 (Principal+KernelEvent+StepStage derives via arkhe-macros)

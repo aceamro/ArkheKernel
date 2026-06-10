@@ -3,12 +3,12 @@
 //! Holds entities, components, scheduler, ID counters, ledger, in-flight
 //! module refs, wall-remainder, and local tick. Mutation flows through the
 //! `pub(crate)` accessor surface; `runtime::apply::apply_stage` is the sole
-//! caller that drives `StepStage` (10-bucket commit-or-rollback) into
+//! caller that drives `StepStage` (9-bucket commit-or-rollback) into
 //! Instance state.
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use crate::abi::{EntityId, InstanceId, Principal, RouteId, Tick, TypeCode};
 use crate::state::config::InstanceConfig;
@@ -22,6 +22,21 @@ pub struct EntityMeta {
     pub owner: Principal,
     /// Tick at which the entity was spawned.
     pub created: Tick,
+}
+
+/// A signal delivered into an instance's per-route inbox by the kernel
+/// router. Ordered within a route by `seq` (a per-instance monotonic
+/// counter), so inbox iteration is deterministic.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct InboundSignal {
+    /// Sending instance.
+    pub from: InstanceId,
+    /// Principal under which the sender dispatched the signal.
+    pub principal: Principal,
+    /// Canonical payload bytes.
+    pub payload: Bytes,
+    /// Per-instance monotonic delivery sequence (intra-route ordering).
+    pub seq: u64,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -46,6 +61,12 @@ pub(crate) struct Instance {
     ledger: ResourceLedger,
     /// Drain-refcount per registered route.
     inflight_refs: BTreeMap<RouteId, u32>,
+    /// Per-route inbound-signal queues, populated by the kernel router at
+    /// delivery time. Deterministic: `BTreeMap` over routes, `VecDeque`
+    /// ordered by each signal's `seq`.
+    signal_inbox: BTreeMap<RouteId, VecDeque<InboundSignal>>,
+    /// Monotonic per-instance signal delivery counter (intra-route order).
+    inbox_seq: u64,
     /// Sub-tick wall-clock remainder accumulator.
     wall_remainder: u128,
     /// Logical local tick advancing per `step()`.
@@ -63,6 +84,8 @@ impl Instance {
             id_counters: IdCounters::default(),
             ledger: ResourceLedger::new(),
             inflight_refs: BTreeMap::new(),
+            signal_inbox: BTreeMap::new(),
+            inbox_seq: 0,
             wall_remainder: 0,
             local_tick: 0,
         }
@@ -237,6 +260,8 @@ impl Instance {
             id_counters: self.id_counters.clone(),
             ledger: self.ledger.clone(),
             inflight_refs: self.inflight_refs.clone(),
+            signal_inbox: self.signal_inbox.clone(),
+            inbox_seq: self.inbox_seq,
             wall_remainder: self.wall_remainder,
             local_tick: self.local_tick,
         }
@@ -253,9 +278,47 @@ impl Instance {
             id_counters: snap.id_counters,
             ledger: snap.ledger,
             inflight_refs: snap.inflight_refs,
+            signal_inbox: snap.signal_inbox,
+            inbox_seq: snap.inbox_seq,
             wall_remainder: snap.wall_remainder,
             local_tick: snap.local_tick,
         }
+    }
+
+    /// BLAKE3 digest of the instance's full canonical post-step state — the
+    /// CIL per-step witness. Hashes the postcard encoding of the complete
+    /// `InstanceSnapshot`, i.e. every field in its declaration order: `id`,
+    /// `config`, `entities`, `components`, `scheduler` (incl. `next_seq` /
+    /// `next_id`), `id_counters`, `ledger`, `inflight_refs`, `signal_inbox`,
+    /// `inbox_seq`, `wall_remainder`, `local_tick`. So any state divergence on
+    /// replay is caught — not just counters. (`id` and `config` are constant
+    /// per instance, so they neither mask nor manufacture a divergence; reusing
+    /// the snapshot keeps one canonical serialization for both digest and
+    /// snapshot/restore.) Deterministic: all state is `BTreeMap`/`VecDeque`/
+    /// scalar (no `HashMap`), and postcard encoding is canonical. Returns the
+    /// zero digest only if encoding fails (impossible for this all-derive type
+    /// graph; treated as a fixed sentinel).
+    pub(crate) fn state_digest(&self) -> [u8; 32] {
+        match postcard::to_allocvec(&self.to_snapshot()) {
+            Ok(bytes) => *blake3::hash(&bytes).as_bytes(),
+            Err(_) => [0u8; 32],
+        }
+    }
+
+    /// Deliver `signal` into this instance's `route` inbox, assigning the
+    /// next per-instance `inbox_seq`. Returns the assigned seq.
+    pub(crate) fn deliver_signal(&mut self, route: RouteId, mut signal: InboundSignal) -> u64 {
+        let seq = self.inbox_seq;
+        self.inbox_seq = self.inbox_seq.saturating_add(1);
+        signal.seq = seq;
+        self.signal_inbox.entry(route).or_default().push_back(signal);
+        seq
+    }
+
+    /// Current inbound-signal queue depth for `route` (0 if none).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn inbox_len(&self, route: RouteId) -> usize {
+        self.signal_inbox.get(&route).map_or(0, VecDeque::len)
     }
 }
 
@@ -273,6 +336,8 @@ pub struct InstanceSnapshot {
     pub(crate) id_counters: IdCounters,
     pub(crate) ledger: ResourceLedger,
     pub(crate) inflight_refs: BTreeMap<RouteId, u32>,
+    pub(crate) signal_inbox: BTreeMap<RouteId, VecDeque<InboundSignal>>,
+    pub(crate) inbox_seq: u64,
     pub(crate) wall_remainder: u128,
     pub(crate) local_tick: u64,
 }
@@ -292,6 +357,7 @@ mod tests {
             default_caps: CapabilityMask::default(),
             max_entities: 100,
             max_scheduled: 1000,
+            max_inbox_per_route: 16,
             memory_budget_bytes: 1 << 20,
             parent: None,
             quota_reduction: QuotaReductionPolicy::default(),
