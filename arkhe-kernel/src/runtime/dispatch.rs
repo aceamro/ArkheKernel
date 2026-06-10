@@ -129,7 +129,11 @@ pub(crate) fn dispatch<'i>(
                 payload,
                 principal: effect_principal,
             });
-            *stage.inflight_refs_delta.entry(route).or_insert(0) += 1;
+            // Saturating, like every other counter in the staged pipeline
+            // (A12 panic-free arithmetic discipline) — never wrap to a
+            // negative (decrement-equivalent) delta.
+            let e = stage.inflight_refs_delta.entry(route).or_insert(0);
+            *e = e.saturating_add(1);
         }
     }
 }

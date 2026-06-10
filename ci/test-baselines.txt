@@ -5,5 +5,5 @@
 # Drift = CI fail forced (operator updates baseline + verifies Layer A/L0 invariants).
 # Update procedure: cargo test --workspace <flags> 2>&1 | grep -E "^test result:" | awk '{s+=$4} END {print s}'
 
-default=241
-all-features=241
+default=251
+all-features=251

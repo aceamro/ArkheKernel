@@ -109,12 +109,16 @@ impl SoftwareMlDsa65Signer {
     /// Construct a signer deterministically from a 32-byte seed.
     /// FIPS 204 ML-DSA.KeyGen_internal — same seed yields same key pair.
     pub fn from_seed(mut seed: [u8; 32]) -> Self {
-        let xi: B32 = seed.into();
+        let mut xi: B32 = seed.into();
         let signing_key = ml_dsa::SigningKey::<MlDsa65>::from_seed(&xi);
         let verifying_key_cache = signing_key.verifying_key();
-        // Scrub the kernel's transient copy of the seed (the long-lived
-        // SigningKey zeroizes on drop via the ml-dsa `zeroize` feature).
+        // Scrub BOTH transient copies of the seed material: the `seed`
+        // argument and the `xi` B32 copy that `into()` produced (a bitwise
+        // copy — `B32 = Array<u8, U32>` has no scrubbing Drop). The
+        // long-lived SigningKey zeroizes on drop via the ml-dsa `zeroize`
+        // feature; these are the kernel-side in-memory copies.
         seed.zeroize();
+        xi.zeroize();
         Self {
             signing_key,
             verifying_key_cache,

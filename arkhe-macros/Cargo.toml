@@ -1,6 +1,6 @@
 [package]
 name = "arkhe-macros"
-version = "0.14.1"
+version = "0.14.2"
 edition = "2021"
 rust-version.workspace = true
 description = "Derive macros for ArkheKernel: ArkheAction / ArkheComponent / ArkheEvent. Companion crate to arkhe-kernel."

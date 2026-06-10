@@ -1,6 +1,6 @@
 [package]
 name = "arkhe-kernel"
-version = "0.14.1"
+version = "0.14.2"
 edition = "2021"
 rust-version.workspace = true
 description = "Domain-neutral deterministic microkernel for virtual worlds. WAL-backed, bit-identical replay, invariant-lifetime shell brand, no async / no unsafe / no floating-point in canonical paths."

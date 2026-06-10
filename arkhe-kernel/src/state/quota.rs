@@ -76,7 +76,11 @@ impl std::error::Error for QuotaReductionError {}
 ///   overflow); the floor remainder `new_quota - sum(scaled)` is
 ///   distributed as +1 per child in ascending `InstanceId` order until
 ///   exhausted (deterministic — A23). `total == 0` short-circuits to
-///   identity.
+///   identity. This policy only ever scales *down*: when `new_quota >=
+///   current_total` the request is not a reduction, so children pass
+///   through unchanged (it never inflates a child above its current
+///   usage — mirroring the no-op posture of `Reject`/`GrandfatherExisting`
+///   on a non-reducing request).
 ///
 /// Panic-free (A12): saturating arithmetic throughout.
 #[must_use = "policy result determines whether the reduction can proceed"]
@@ -108,7 +112,10 @@ pub fn apply_quota_reduction(
         }
         QuotaReductionPolicy::GrandfatherExisting => Ok(children.to_vec()),
         QuotaReductionPolicy::ThrottleProportional => {
-            if children.is_empty() || current_total == 0 {
+            // Only scale down. A non-reducing request (`new_quota >=
+            // current_total`) passes children through unchanged rather than
+            // inflating each child's quota above its current usage.
+            if children.is_empty() || current_total == 0 || new_quota >= current_total {
                 return Ok(children.to_vec());
             }
             let total = current_total as u128;
@@ -233,6 +240,27 @@ mod tests {
         assert_eq!(result, vec![(id(1), 34), (id(2), 33), (id(3), 33)]);
         let sum: u64 = result.iter().map(|(_, q)| *q).sum();
         assert_eq!(sum, 100);
+    }
+
+    #[test]
+    fn throttle_does_not_scale_up_when_quota_exceeds_total() {
+        // `new_quota > current_total` is not a reduction: children must pass
+        // through unchanged, never inflated above current usage. (Regression
+        // for the "scaled down" contract — previously this scaled UP.)
+        let cs = vec![(id(1), 100), (id(2), 200)];
+        let result =
+            apply_quota_reduction(QuotaReductionPolicy::ThrottleProportional, 600, &cs).unwrap();
+        assert_eq!(result, cs);
+    }
+
+    #[test]
+    fn throttle_at_exact_total_is_identity() {
+        // `new_quota == current_total`: floor(current * total / total) ==
+        // current already, and the guard short-circuits to identity.
+        let cs = vec![(id(1), 100), (id(2), 200)];
+        let result =
+            apply_quota_reduction(QuotaReductionPolicy::ThrottleProportional, 300, &cs).unwrap();
+        assert_eq!(result, cs);
     }
 
     #[test]

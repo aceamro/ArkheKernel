@@ -48,6 +48,16 @@ impl ResourceLedger {
         u32::try_from(self.entities.len()).unwrap_or(u32::MAX)
     }
 
+    /// Currently-attributed declared size of the `(entity, type_code)`
+    /// component, or `None` if no such component is accounted. This is the
+    /// amount a `RemoveComponent` will actually free at apply time, so the
+    /// budget projection in `runtime::kernel::step()` credits removals by
+    /// this stored value — never by the caller-declared `size`, which is
+    /// untrusted and could otherwise poison the projection.
+    pub(crate) fn component_size(&self, entity: EntityId, tc: TypeCode) -> Option<u64> {
+        self.component_sizes.get(&(entity, tc)).copied()
+    }
+
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn entity_bytes(&self, id: EntityId) -> u64 {
         self.component_sizes

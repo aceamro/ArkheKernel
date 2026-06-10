@@ -7,6 +7,75 @@ a distinct chain epoch that does not replay under another. Patch releases
 (0.N.x) carry wire-format-neutral maintenance — dependency bumps, docs —
 and hold the epoch. Version 1.0 is intentionally never reached.
 
+## [0.14.2] — correctness hardening + step-loop optimization (wire-format-neutral)
+
+Patch release. The persisted wire format and chain epoch are unchanged:
+`WalHeader::CURRENT_KERNEL_SEMVER` `(0,14,0)`, `ABI_VERSION` `(0,14)`, and
+the `DOMAIN_CTX` `v0.14` chain-separation literal all hold. No
+`WalRecordBody`, header, or signature layout changed, so every 0.14-epoch
+WAL replays bit-identically under 0.14.2. The fixes below alter behavior
+only for inputs that were already incorrect (budget-bypassing Op sequences,
+component writes to a nonexistent entity); honest histories are unaffected.
+
+### Fixed — `memory_budget_bytes` enforcement (A21)
+
+- **`Op::RemoveComponent` no longer poisons the budget projection.** The
+  per-Op gate credited the caller-declared `size`, while the ledger frees
+  only the component's *stored* size — so one phantom/oversized remove
+  (e.g. `size: u64::MAX`) disabled the byte budget for the rest of the step.
+  The projection now credits the ledger's stored size, never the untrusted
+  caller value.
+- **The projection is computed in saturating `u64`** (matching the ledger),
+  replacing an `i64` round-trip. A `memory_budget_bytes` above `i64::MAX` no
+  longer silently disables enforcement, and an oversized add saturates to
+  `u64::MAX` rather than clamping under the gate.
+
+### Fixed — state/ledger consistency and reporting
+
+- **`SetComponent` on an unknown (never-spawned or despawned) entity is now
+  a no-op**, mirroring the ledger's existing entity gate. Previously the
+  component was stored without accounting, diverging `InstanceView` from the
+  ledger and bypassing the byte budget across steps.
+- **`StepReport.effects_applied` no longer counts rolled-back Ops.** On an
+  authorize-deny rollback (`any_denied`) the count is now folded only on the
+  commit path, so a discarded step reports zero applied effects.
+- **`QuotaReductionPolicy::ThrottleProportional` no longer scales child
+  quotas *up*.** A non-reducing request (`new_quota >= current_total`) now
+  passes children through unchanged, matching the "scaled down" contract and
+  the no-op posture of `Reject`/`GrandfatherExisting`.
+- **`dispatch` increments `inflight_refs_delta` with `saturating_add`**, the
+  last non-saturating arithmetic in the staged pipeline (A12 discipline).
+
+### Security — secret scrubbing (defence-in-depth)
+
+- **`SoftwareMlDsa65Signer::from_seed` now zeroizes the `xi` seed copy.**
+  `let xi: B32 = seed.into()` produced a second in-memory copy of the 32-byte
+  ML-DSA seed (`B32 = Array<u8, U32>` has no scrubbing `Drop`); only `seed`
+  was scrubbed. Both transient copies are now wiped, matching the kernel's
+  existing seed-scrub discipline. In-memory hygiene only — no serialized
+  bytes, keys, or signatures change.
+
+### Performance — `step()` per-instance walk + per-step staging
+
+- `step()` destructures the kernel's fields once and iterates
+  `instances.iter_mut()` directly, removing the per-step `Vec<InstanceId>`
+  snapshot and the redundant `BTreeMap` re-lookups it existed to work
+  around (O(n·log n) → O(n) in instance count). `BTreeMap::iter_mut` yields
+  ascending `InstanceId` (A23), so WAL append order, state-mutation order,
+  and observer delivery order are unchanged.
+- The kernel reuses one `StepStage` scratch across actions (a private,
+  non-serialized `step_scratch` field, `clear()`ed before each action)
+  instead of allocating a fresh staging buffer every step. `apply_stage`
+  now borrows the stage `&mut` and drains the buckets it commits (retaining
+  capacity); the rollback path simply skips apply. `clear()` is exhaustive
+  over all ten buckets (compile-checked via destructure), so the reused
+  scratch is byte-for-byte equivalent to `StepStage::default()` — the
+  frozen-hex chain-hash fixtures and the multi-record replay tests confirm
+  WAL bytes are unchanged.
+- Together these cut `kernel_step_with_100_pending_actions` ~16.9 µs → ~12.6 µs
+  (~26%). Both wins are allocation/lookup reductions, invisible under
+  Ed25519/Hybrid signing where the signing primitive (27 µs–924 µs) dominates.
+
 ## [0.14.1] — dependency maintenance (wire-format-neutral)
 
 Patch release. The persisted wire format and chain epoch are unchanged:

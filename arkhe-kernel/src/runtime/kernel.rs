@@ -12,7 +12,7 @@ use crate::state::{
     Action, ActionContext, Effect, Instance, InstanceConfig, ScheduledActionId, Unverified,
 };
 
-use super::apply::{apply_stage, discard_stage};
+use super::apply::apply_stage;
 use super::dispatch::dispatch;
 use super::event::{KernelEvent, ObserverHandle};
 use super::observer::{KernelObserver, ObserverRegistry};
@@ -38,6 +38,11 @@ pub struct Kernel {
     observers: ObserverRegistry,
     next_instance_id: u64,
     wal: Option<WalWriter>,
+    /// Per-step staging scratch, reused across actions to avoid reallocating
+    /// the `StepStage` buckets every step. `clear()`ed before each action;
+    /// never serialized (not part of `KernelSnapshot`) and never read across
+    /// `step()` calls, so it carries no observable state.
+    step_scratch: StepStage,
 }
 
 /// Aggregated counters returned by [`Kernel::step`].
@@ -90,6 +95,7 @@ impl Kernel {
             observers: ObserverRegistry::new(),
             next_instance_id: 0,
             wal: None,
+            step_scratch: StepStage::default(),
         }
     }
 
@@ -102,6 +108,7 @@ impl Kernel {
             observers: ObserverRegistry::new(),
             next_instance_id: 0,
             wal: Some(WalWriter::new(world_id, manifest_digest)),
+            step_scratch: StepStage::default(),
         }
     }
 
@@ -124,6 +131,7 @@ impl Kernel {
                 manifest_digest,
                 sig_class,
             )),
+            step_scratch: StepStage::default(),
         }
     }
 
@@ -220,6 +228,7 @@ impl Kernel {
             observers: ObserverRegistry::new(),
             next_instance_id,
             wal: None,
+            step_scratch: StepStage::default(),
         }
     }
 
@@ -321,19 +330,34 @@ impl Kernel {
     pub fn step(&mut self, now: Tick, caps: CapabilityMask) -> StepReport {
         let mut report = StepReport::default();
 
-        let instance_ids: Vec<InstanceId> = self.instances.keys().copied().collect();
-        for inst_id in instance_ids {
-            let entry = match self.instances.get_mut(&inst_id) {
-                Some(inst) => inst.scheduler_mut().pop_due(now),
-                None => continue,
-            };
-            let entry = match entry {
+        // Destructure once so the per-instance walk borrows `instances`
+        // (mutably, via `iter_mut`) disjointly from the registry / observers /
+        // WAL. This removes the per-step `Vec<InstanceId>` snapshot and the
+        // repeated O(log n) re-lookups it existed only to work around (the
+        // single `inst` borrow serves pop_due, the read view, and apply).
+        // `BTreeMap::iter_mut` yields ascending `InstanceId` (A23) — the same
+        // order as the previous collected-keys walk, so WAL append order,
+        // state-mutation order, and observer delivery order are unchanged. No
+        // Op creates or removes an instance mid-step, so holding one `inst`
+        // borrow across the iteration is sound (the old `None => continue`
+        // re-lookup guard was dead code).
+        let Self {
+            instances,
+            action_registry,
+            observers,
+            wal,
+            step_scratch,
+            ..
+        } = self;
+
+        for (&inst_id, inst) in instances.iter_mut() {
+            let entry = match inst.scheduler_mut().pop_due(now) {
                 Some(e) => e,
                 None => continue,
             };
             report.actions_executed = report.actions_executed.saturating_add(1);
 
-            let reg = match self.action_registry.get(entry.action_type_code).cloned() {
+            let reg = match action_registry.get(entry.action_type_code).cloned() {
                 Some(r) => r,
                 None => continue,
             };
@@ -343,16 +367,25 @@ impl Kernel {
                 Err(_) => continue,
             };
 
-            let inst_ref = self.instances.get(&inst_id).expect("instance present");
-            let ctx = ActionContext::new(entry.actor, now, inst_id, inst_ref);
+            let ctx = ActionContext::new(entry.actor, now, inst_id, &*inst);
             let ops = action.compute_dyn(&ctx);
 
-            let mut stage = StepStage::default();
+            // Immutable read view for the gate loop; its borrow ends before the
+            // mutable `apply_stage` below (NLL).
+            let inst_ref = &*inst;
+            // Reuse the kernel-owned scratch (capacity retained across actions)
+            // rather than allocating a fresh StepStage each step. `clear()`
+            // makes it identical to `StepStage::default()`.
+            step_scratch.clear();
+            let stage = &mut *step_scratch;
             let mut next_scheduled_id = inst_ref.id_counters_snapshot().next_scheduled;
             let budget = inst_ref.config().memory_budget_bytes;
-            let baseline_bytes: i64 =
-                i64::try_from(inst_ref.ledger().total_bytes()).unwrap_or(i64::MAX);
+            let baseline_bytes: u64 = inst_ref.ledger().total_bytes();
             let mut any_denied = false;
+            // Provisional applied count — folded into the report only on the
+            // commit path. If the step rolls back (`any_denied`), these ops
+            // are discarded, so they must not be counted as applied.
+            let mut applied_this_action: u32 = 0;
             for op in ops {
                 let principal_clone = match &entry.principal {
                     Principal::Unauthenticated => Principal::Unauthenticated,
@@ -367,22 +400,41 @@ impl Kernel {
                         // Authorize-deny rolls back the whole stage (any_denied);
                         // budget-deny is a per-Op skip that does NOT rollback.
                         if budget > 0 {
-                            // `size` is a caller-supplied `u64`; clamp to
-                            // `i64::MAX` so a value above `i64::MAX` cannot wrap
-                            // negative and shrink the projection past the gate.
-                            let op_size: i64 = match &authorized.op {
+                            // Project the post-commit component-byte total in
+                            // saturating u64 (matching ResourceLedger's own
+                            // arithmetic): the baseline + every already-staged
+                            // component delta + this Op. A SetComponent adds its
+                            // caller-declared `size`; a RemoveComponent credits
+                            // only the bytes the ledger will actually free (its
+                            // stored size), never the untrusted caller-declared
+                            // `size` — an inflated remove would otherwise poison
+                            // the projection and disable the budget for the rest
+                            // of the step. Working in u64 (not i64) means an
+                            // oversized add saturates to u64::MAX and trips any
+                            // budget below u64::MAX — including budgets above
+                            // i64::MAX, which the old i64 threshold silently
+                            // disabled.
+                            let staged = super::stage::projected_component_bytes(
+                                baseline_bytes,
+                                &*stage,
+                                inst_ref.ledger(),
+                            );
+                            let projected = match &authorized.op {
                                 crate::state::Op::SetComponent { size, .. } => {
-                                    i64::try_from(*size).unwrap_or(i64::MAX)
+                                    staged.saturating_add(*size)
                                 }
-                                crate::state::Op::RemoveComponent { size, .. } => {
-                                    i64::try_from(*size).unwrap_or(i64::MAX).saturating_neg()
+                                crate::state::Op::RemoveComponent {
+                                    entity, type_code, ..
+                                } => {
+                                    let freed = inst_ref
+                                        .ledger()
+                                        .component_size(*entity, *type_code)
+                                        .unwrap_or(0);
+                                    staged.saturating_sub(freed)
                                 }
-                                _ => 0,
+                                _ => staged,
                             };
-                            let projected = baseline_bytes
-                                .saturating_add(super::stage::bytes_delta(&stage))
-                                .saturating_add(op_size);
-                            if projected > i64::try_from(budget).unwrap_or(i64::MAX) {
+                            if projected > budget {
                                 report.effects_denied = report.effects_denied.saturating_add(1);
                                 stage.events.push_back(KernelEvent::EffectFailed {
                                     instance: inst_id,
@@ -428,8 +480,8 @@ impl Kernel {
                                 continue;
                             }
                         }
-                        dispatch(authorized, &mut stage, now, &mut next_scheduled_id);
-                        report.effects_applied = report.effects_applied.saturating_add(1);
+                        dispatch(authorized, stage, now, &mut next_scheduled_id);
+                        applied_this_action = applied_this_action.saturating_add(1);
                     }
                     Err(_) => {
                         report.effects_denied = report.effects_denied.saturating_add(1);
@@ -439,10 +491,17 @@ impl Kernel {
             }
 
             if any_denied {
-                let inst_mut = self.instances.get_mut(&inst_id).expect("instance present");
-                discard_stage(inst_mut, stage);
+                // Rollback: skip apply entirely. The scratch is `clear()`ed at
+                // the top of the next action, so nothing staged here leaks.
                 continue;
             }
+
+            // Commit path: only now are the dispatched ops actually applied,
+            // so fold the provisional count into the report (a rolled-back
+            // step contributes zero applied effects).
+            report.effects_applied = report
+                .effects_applied
+                .saturating_add(applied_this_action);
 
             // Domain emit count covers only `DomainEventEmitted`; other staged
             // events (e.g. `EffectFailed` from budget deny) are kernel events.
@@ -457,7 +516,7 @@ impl Kernel {
             let events_to_deliver: Vec<KernelEvent> = stage.events.iter().cloned().collect();
 
             // Snapshot record metadata before stage is consumed by apply.
-            let wal_stage = if self.wal.is_some() {
+            let wal_stage = if wal.is_some() {
                 Some(stage.clone())
             } else {
                 None
@@ -471,10 +530,9 @@ impl Kernel {
             let action_type_for_wal = entry.action_type_code;
             let actor_for_wal = entry.actor;
 
-            let inst_mut = self.instances.get_mut(&inst_id).expect("instance present");
-            apply_stage(inst_mut, stage);
+            apply_stage(inst, stage);
 
-            if let (Some(wal), Some(s)) = (self.wal.as_mut(), wal_stage) {
+            if let (Some(wal), Some(s)) = (wal.as_mut(), wal_stage) {
                 let _ = wal.append(
                     now,
                     inst_id,
@@ -489,7 +547,7 @@ impl Kernel {
             }
 
             for event in events_to_deliver {
-                let evicted = self.observers.deliver(&event);
+                let evicted = observers.deliver(&event);
                 report.observers_evicted = report
                     .observers_evicted
                     .saturating_add(evicted.len() as u32);
@@ -500,7 +558,7 @@ impl Kernel {
                 action_type: entry.action_type_code,
                 at: now,
             };
-            let evicted = self.observers.deliver(&action_executed);
+            let evicted = observers.deliver(&action_executed);
             report.observers_evicted = report
                 .observers_evicted
                 .saturating_add(evicted.len() as u32);
@@ -613,6 +671,74 @@ mod tests {
         }
     }
 
+    // Spawns an entity, issues a phantom RemoveComponent with an inflated
+    // caller `size` against a component that does not exist, then two 90-byte
+    // SetComponents (budget-poison regression: the phantom remove must NOT
+    // credit its declared size into the projection and disable the budget).
+    #[derive(Serialize, Deserialize)]
+    struct PhantomRemovePoisonAction;
+    impl Sealed for PhantomRemovePoisonAction {}
+    impl ActionDeriv for PhantomRemovePoisonAction {
+        const TYPE_CODE: TypeCode = TypeCode(105);
+        const SCHEMA_VERSION: u32 = 1;
+    }
+    impl ActionCompute for PhantomRemovePoisonAction {
+        fn compute(&self, _ctx: &ActionContext) -> Vec<Op> {
+            let e = EntityId::new(1).unwrap();
+            vec![
+                Op::SpawnEntity {
+                    id: e,
+                    owner: Principal::System,
+                },
+                Op::RemoveComponent {
+                    entity: e,
+                    type_code: TypeCode(99), // never set — phantom
+                    size: u64::MAX,          // inflated free — must be ignored
+                },
+                Op::SetComponent {
+                    entity: e,
+                    type_code: TypeCode(8),
+                    bytes: Bytes::from_static(b"a"),
+                    size: 90,
+                },
+                Op::SetComponent {
+                    entity: e,
+                    type_code: TypeCode(9),
+                    bytes: Bytes::from_static(b"b"),
+                    size: 90,
+                },
+            ]
+        }
+    }
+
+    // Emits a SpawnEntity (allowed for External) then a ScheduleAction (needs
+    // SYSTEM). Under non-SYSTEM caps the schedule authorize-denies, rolling
+    // back the whole step — the earlier spawn must not count as applied.
+    #[derive(Serialize, Deserialize)]
+    struct SpawnThenScheduleAction;
+    impl Sealed for SpawnThenScheduleAction {}
+    impl ActionDeriv for SpawnThenScheduleAction {
+        const TYPE_CODE: TypeCode = TypeCode(106);
+        const SCHEMA_VERSION: u32 = 1;
+    }
+    impl ActionCompute for SpawnThenScheduleAction {
+        fn compute(&self, _ctx: &ActionContext) -> Vec<Op> {
+            vec![
+                Op::SpawnEntity {
+                    id: EntityId::new(1).unwrap(),
+                    owner: Principal::System,
+                },
+                Op::ScheduleAction {
+                    at: Tick(10),
+                    actor: None,
+                    action_type_code: TypeCode(100),
+                    action_bytes: Bytes::from_static(b""),
+                    action_principal: Principal::System,
+                },
+            ]
+        }
+    }
+
     struct CountingObserver {
         count: Arc<AtomicU32>,
     }
@@ -707,6 +833,88 @@ mod tests {
         let report = k.step(Tick(0), CapabilityMask::SYSTEM);
         assert_eq!(report.effects_applied, 0);
         assert_eq!(report.effects_denied, 1);
+    }
+
+    #[test]
+    fn step_budget_above_i64_max_still_enforced() {
+        // Regression: a memory_budget_bytes above i64::MAX must NOT silently
+        // disable enforcement. The old i64 threshold round-trip collapsed to
+        // i64::MAX, so an oversized add (which projects to i64::MAX) never
+        // exceeded it and always committed. In u64 space, a u64::MAX add
+        // saturates the projection above the (still-finite) budget and denies.
+        let mut k = Kernel::new();
+        k.register_action::<OversizedSetAction>();
+        let inst = k.create_instance(InstanceConfig {
+            memory_budget_bytes: 1u64 << 63, // i64::MAX + 1, above i64::MAX
+            ..Default::default()
+        });
+        k.submit(inst, Principal::System, None, Tick(0), TypeCode(104), Vec::new())
+            .unwrap();
+        let report = k.step(Tick(0), CapabilityMask::SYSTEM);
+        assert_eq!(report.effects_applied, 0);
+        assert_eq!(
+            report.effects_denied, 1,
+            "a u64::MAX add must trip a budget above i64::MAX"
+        );
+    }
+
+    #[test]
+    fn step_phantom_remove_does_not_bypass_budget() {
+        // Regression: a RemoveComponent with an inflated caller `size` against
+        // a nonexistent component must NOT credit phantom freed bytes into the
+        // budget projection. Spawn + phantom-remove + the first 90-byte
+        // SetComponent commit (90 <= 100); the second 90-byte SetComponent
+        // would push the total to 180 > 100 and is denied.
+        let mut k = Kernel::new();
+        k.register_action::<PhantomRemovePoisonAction>();
+        let inst = k.create_instance(InstanceConfig {
+            memory_budget_bytes: 100,
+            ..Default::default()
+        });
+        k.submit(inst, Principal::System, None, Tick(0), TypeCode(105), Vec::new())
+            .unwrap();
+        let report = k.step(Tick(0), CapabilityMask::SYSTEM);
+        assert_eq!(
+            report.effects_denied, 1,
+            "the second SetComponent must be denied, not slipped past a poisoned budget"
+        );
+        let total = k.instances.get(&inst).unwrap().ledger().total_bytes();
+        assert_eq!(
+            total, 90,
+            "exactly the first 90-byte component is accounted (budget held at 100)"
+        );
+    }
+
+    #[test]
+    fn step_rollback_does_not_count_applied_effects() {
+        // Regression: when a later Op authorize-denies and the whole step
+        // rolls back, an earlier dispatched Op must NOT be counted in
+        // effects_applied (it was discarded), and instance state is unchanged.
+        let mut k = Kernel::new();
+        k.register_action::<SpawnThenScheduleAction>();
+        let inst = k.create_instance(InstanceConfig::default());
+        k.submit(
+            inst,
+            Principal::External(ExternalId(7)),
+            None,
+            Tick(0),
+            TypeCode(106),
+            Vec::new(),
+        )
+        .unwrap();
+        // Non-SYSTEM caps: External may SpawnEntity but not ScheduleAction →
+        // the schedule authorize-denies → any_denied → rollback.
+        let report = k.step(Tick(0), CapabilityMask::empty());
+        assert_eq!(
+            report.effects_applied, 0,
+            "a rolled-back spawn must not count as applied"
+        );
+        assert!(report.effects_denied >= 1);
+        assert_eq!(
+            k.instances.get(&inst).unwrap().entities_len(),
+            0,
+            "rollback restores instance state"
+        );
     }
 
     #[test]
